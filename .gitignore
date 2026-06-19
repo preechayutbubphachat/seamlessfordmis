@@ -1,0 +1,64 @@
+
+# operational/local sensitive files
+data/**
+!data/
+!data/README.md
+.env
+WIP_*.patch
+backend/.venv/
+.venv/
+*.db
+*.sqlite
+*.db-wal
+*.db-shm
+
+# seed sample data; treat as sensitive in public repo
+seed/*.csv
+
+
+
+
+
+
+
+# --- privacy hardening (orphan clean root) ---
+.env.*
+!.env.example
+!frontend/.env.example
+*.patch
+*.bundle
+
+
+# generated dependencies
+node_modules/
+**/node_modules/
+web/node_modules/
+frontend/node_modules/
+backend/node_modules/
+
+
+
+# --- binaries / build artifacts / local env / uploads (never in public repo) ---
+*.exe
+launcher/dist/
+launcher/build/
+*.spec
+web/.next/
+**/.next/
+web/.env.local
+**/.env.local
+uploads/
+**/uploads/
+
+# --- round 2: bytecode / logs / build / tooling / runtime config ---
+__pycache__/
+*.pyc
+*.log
+logs/
+tmp-logs/
+frontend/out/
+*.tsbuildinfo
+desktop-sqlite-test-results.txt
+.serena/
+backend/config/settings.json
+!.env.offline.example
