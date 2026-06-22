@@ -1,0 +1,170 @@
+[
+  {
+    "normalized_disease_key": "dm",
+    "group_type": "disease",
+    "diagnosis_code": "E119",
+    "disease_name_raw": "Diabetes Mellitus Type 2",
+    "disease_group_label": "เบาหวาน",
+    "description": "Type 2 diabetes diagnosis code mapping"
+  },
+  {
+    "normalized_disease_key": "ht",
+    "group_type": "disease",
+    "diagnosis_code": "I10",
+    "disease_name_raw": "Essential Hypertension",
+    "disease_group_label": "ความดันโลหิตสูง",
+    "description": "Primary hypertension diagnosis code mapping"
+  },
+  {
+    "normalized_disease_key": "ckd",
+    "group_type": "disease",
+    "diagnosis_code": "N189",
+    "disease_name_raw": "Chronic Kidney Disease",
+    "disease_group_label": "โรคไตเรื้อรัง",
+    "description": "CKD unspecified stage diagnosis code mapping"
+  },
+  {
+    "normalized_disease_key": "hep_b_screen",
+    "group_type": "service",
+    "diagnosis_code": null,
+    "disease_name_raw": "บริการตรวจคัดกรองไวรัสตับอักเสบ บี",
+    "disease_group_label": "คัดกรองไวรัสตับอักเสบบี",
+    "description": "Imported from real billed service item in Individual sheet"
+  },
+  {
+    "normalized_disease_key": "hep_c_screen",
+    "group_type": "service",
+    "diagnosis_code": null,
+    "disease_name_raw": "การตรวจคัดกรองโรคไวรัสตับอักเสบ ซี",
+    "disease_group_label": "คัดกรองไวรัสตับอักเสบซี",
+    "description": "Imported from real billed service item in Individual sheet"
+  },
+  {
+    "normalized_disease_key": "cervical_screen",
+    "group_type": "service",
+    "diagnosis_code": "Z124",
+    "disease_name_raw": null,
+    "disease_group_label": "คัดกรองมะเร็งปากมดลูก",
+    "description": "Diagnosis code mapping for cervical cancer screening"
+  },
+  {
+    "normalized_disease_key": "cervical_screen",
+    "group_type": "service",
+    "diagnosis_code": null,
+    "disease_name_raw": "คัดกรองมะเร็งปากมดลูก (Pap Smear/VIA)",
+    "disease_group_label": "คัดกรองมะเร็งปากมดลูก",
+    "description": "Imported from real billed service item in Individual sheet"
+  },
+  {
+    "normalized_disease_key": "cervical_screen",
+    "group_type": "service",
+    "diagnosis_code": null,
+    "disease_name_raw": "การตรวจคัดกรองมะเร็งปากมดลูกโดยวิธี Pap Smear",
+    "disease_group_label": "คัดกรองมะเร็งปากมดลูก",
+    "description": "Alias billed service item grouped with cervical cancer screening"
+  },
+  {
+    "normalized_disease_key": "cervical_cancer_screen",
+    "group_type": "service",
+    "diagnosis_code": null,
+    "disease_name_raw": null,
+    "disease_group_label": "มะเร็งปากมดลูก",
+    "description": "Query alias that expands to cervical cancer screening records"
+  },
+  {
+    "normalized_disease_key": "pap_smear_screen",
+    "group_type": "service",
+    "diagnosis_code": null,
+    "disease_name_raw": null,
+    "disease_group_label": "Pap Smear",
+    "description": "Query alias that expands to cervical cancer screening records"
+  },
+  {
+    "normalized_disease_key": "via_screen",
+    "group_type": "service",
+    "diagnosis_code": null,
+    "disease_name_raw": null,
+    "disease_group_label": "VIA",
+    "description": "Query alias that expands to cervical cancer screening records"
+  },
+  {
+    "normalized_disease_key": "hpv_screen",
+    "group_type": "service",
+    "diagnosis_code": null,
+    "disease_name_raw": null,
+    "disease_group_label": "HPV",
+    "description": "Query alias that expands to cervical cancer screening records"
+  },
+  {
+    "normalized_disease_key": "flu_vaccine",
+    "group_type": "service",
+    "diagnosis_code": null,
+    "disease_name_raw": "ฉีดวัคซีนป้องกันโรคป้องกันโรคไข้หวัดใหญ่ตามฤดูกาล(7กลุ่มเสี่ยง)",
+    "disease_group_label": "วัคซีนไข้หวัดใหญ่ตามฤดูกาล",
+    "description": "Imported from real billed service item in Individual sheet"
+  },
+  {
+    "normalized_disease_key": "flu_vaccine",
+    "group_type": "service",
+    "diagnosis_code": null,
+    "disease_name_raw": "วัคซีนป้องกันโรคไข้หวัดใหญ่ตามฤดูกาล",
+    "disease_group_label": "วัคซีนไข้หวัดใหญ่ตามฤดูกาล",
+    "description": "Alias billed service item grouped with seasonal flu vaccination"
+  },
+  {
+    "normalized_disease_key": "dm_screen_fpg",
+    "group_type": "service",
+    "diagnosis_code": null,
+    "disease_name_raw": "ค่าบริการเจาะเลือดจากหลอดเลือดดำ ภายหลังอดอาหาร 8 ชั่วโมง ส่งตรวจวัดระดับน้ำตาล (FPG)",
+    "disease_group_label": "คัดกรองเบาหวาน (FPG)",
+    "description": "Billed FPG service used as disease-screening evidence"
+  },
+  {
+    "normalized_disease_key": "cvd_risk_screen",
+    "group_type": "service",
+    "diagnosis_code": null,
+    "disease_name_raw": "ค่าบริการเจาะเลือดจากหลอดเลือดดำ ภายหลังอดอาหาร 8 ชั่วโมง ส่งตรวจ Total Cholesterol และ HDL ความดันโลหิตสูง ปัจจัยเสี่ยงต่อการเกิดโรคโรคหัวใจและหลอดเลือด ความเครียดและซึมเศร้า ความเสี่ยงต่อการใช้บุหรี่ แอลกอฮอล์และสารเสพติด และการให้คำปรึกษาแนะนำ",
+    "disease_group_label": "ประเมินความเสี่ยงโรคหัวใจและหลอดเลือด",
+    "description": "Bundled fasting lipid and risk assessment service item"
+  },
+  {
+    "normalized_disease_key": "kidney_function_test",
+    "group_type": "service",
+    "diagnosis_code": null,
+    "disease_name_raw": "ตรวจการทำงานของไต Creatinine และ eGFR",
+    "disease_group_label": "ตรวจการทำงานของไต",
+    "description": "Billed kidney function test service item"
+  },
+  {
+    "normalized_disease_key": "urinalysis",
+    "group_type": "service",
+    "diagnosis_code": null,
+    "disease_name_raw": "ตรวจปัสสาวะ UA",
+    "disease_group_label": "ตรวจปัสสาวะ",
+    "description": "Billed urine analysis service item"
+  },
+  {
+    "normalized_disease_key": "cbc",
+    "group_type": "service",
+    "diagnosis_code": null,
+    "disease_name_raw": "ตรวจนับเม็ดเลือดอย่างสมบูรณ์ (CBC)",
+    "disease_group_label": "ตรวจความสมบูรณ์ของเม็ดเลือด",
+    "description": "Billed complete blood count service item"
+  },
+  {
+    "normalized_disease_key": "chest_xray",
+    "group_type": "service",
+    "diagnosis_code": null,
+    "disease_name_raw": "เอกซเรย์ทรวงอก (Chest X-ray)",
+    "disease_group_label": "เอกซเรย์ทรวงอก",
+    "description": "Billed chest radiography service item"
+  },
+  {
+    "normalized_disease_key": "specimen_collection",
+    "group_type": "service",
+    "diagnosis_code": null,
+    "disease_name_raw": "ค่าบริการเก็บตัวอย่าง",
+    "disease_group_label": "เก็บตัวอย่างส่งตรวจ",
+    "description": "Support service item retained for audit visibility"
+  }
+]

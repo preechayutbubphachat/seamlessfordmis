@@ -1,0 +1,25 @@
+{
+  "name": "hospital-group-history-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "clean": "node -e \"const fs=require('fs'); ['.next','.next-dev'].forEach((dir)=>fs.rmSync(dir,{recursive:true,force:true}));\"",
+    "dev": "next dev --hostname 127.0.0.1 --port 3020",
+    "dev:clean": "npm run clean && next dev --hostname 127.0.0.1 --port 3020",
+    "build": "next build",
+    "start": "next start -p 3020",
+    "start:clean": "npm run clean && next build && next start -p 3020",
+    "desktop:build": "node scripts/desktop-build.js"
+  },
+  "dependencies": {
+    "next": "15.2.4",
+    "react": "19.0.0",
+    "react-dom": "19.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.14.0",
+    "@types/react": "19.0.12",
+    "@types/react-dom": "19.0.4",
+    "typescript": "5.8.3"
+  }
+}

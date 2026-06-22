@@ -1,0 +1,5 @@
+pid,citizen_id,hn,full_name,birth_date,visit_date,diagnosis_code,disease_name_raw,encounter_type,provider_name
+P001,1234567890123,HN001,Somchai Dee,1970-01-15,2025-01-05,E119,Diabetes Mellitus Type 2,OPD,Dr. Anan
+P001,1234567890123,HN001,Somchai Dee,1970-01-15,2025-02-10,I10,Essential Hypertension,OPD,Dr. Mali
+P002,2234567890123,HN002,Suda Jai,1982-05-22,2024-11-20,N189,Chronic Kidney Disease,IPD,Dr. Narin
+P003,3234567890123,HN003,Niran Chai,1965-07-08,2025-03-12,E119,Diabetes Mellitus Type 2,OPD,Dr. Anan

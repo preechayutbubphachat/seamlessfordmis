@@ -1,0 +1,171 @@
+@echo off
+setlocal EnableExtensions EnableDelayedExpansion
+cd /d "%~dp0\.."
+
+:: ============================================================
+::  danger-remove-all-data.bat.example
+::
+::  [อันตรายมาก] ลบข้อมูลผู้ป่วยและฐานข้อมูลทั้งหมดออกอย่างถาวร
+::
+::  นี่คือไฟล์ตัวอย่าง (.example) — ต้องเปลี่ยนชื่อเป็น
+::  danger-remove-all-data.bat ก่อนจึงจะรันได้
+::
+::  ใช้เฉพาะเมื่อ:
+::    - ต้องการล้างระบบเพื่อทดสอบใหม่ทั้งหมด
+::    - ต้องการถอนการติดตั้งระบบและลบข้อมูลออกทุกอย่าง
+::    - ได้รับอนุญาตจากผู้บริหารโรงพยาบาลอย่างเป็นลายลักษณ์อักษร
+::
+::  สิ่งที่จะถูกลบถาวร (ไม่สามารถกู้คืนได้):
+::    ✗ ฐานข้อมูลผู้ป่วย (postgres_data)
+::    ✗ ข้อมูลต้นทาง (source_data)
+::    ✗ ไฟล์ที่อัปโหลด (uploads)
+::    ✗ รายงาน (reports)
+::    ✗ Logs ใน Docker volume (logs)
+::    ✗ ข้อมูลสำรองใน data\backups\
+::
+::  สิ่งที่จะ ไม่ ถูกลบ:
+::    ✓ ไฟล์โปรแกรม (offline\, docker\, docker-compose.yml)
+::    ✓ ไฟล์ .env (การตั้งค่า)
+::    ✓ Logs ใน C:\SeamlessFordMIS\logs\
+::
+::  กรุณาสำรองข้อมูลก่อนรันสคริปต์นี้เสมอ!
+:: ============================================================
+
+cls
+echo.
+echo  ╔══════════════════════════════════════════════════════════╗
+echo  ║  [อันตราย] ลบข้อมูลผู้ป่วยทั้งหมดออกอย่างถาวร          ║
+echo  ╠══════════════════════════════════════════════════════════╣
+echo  ║  ข้อมูลที่จะถูกลบ ไม่สามารถกู้คืนได้                   ║
+echo  ║  ตรวจสอบให้แน่ใจว่าสำรองข้อมูลแล้ว                     ║
+echo  ╚══════════════════════════════════════════════════════════╝
+echo.
+echo   Docker volumes ที่จะถูกลบถาวร:
+echo     • seamlessfordmis_postgres_data   (ฐานข้อมูลผู้ป่วย)
+echo     • seamlessfordmis_source_data     (ข้อมูลต้นทาง)
+echo     • seamlessfordmis_uploads         (ไฟล์อัปโหลด)
+echo     • seamlessfordmis_reports         (รายงาน)
+echo     • seamlessfordmis_logs            (Logs)
+echo.
+echo   โฟลเดอร์ที่จะถูกลบถาวร:
+echo     • data\backups\                   (ข้อมูลสำรอง)
+echo.
+
+:: ---- ตรวจสอบ Docker ----
+where docker >nul 2>nul || (
+  echo [ERROR] ไม่พบ Docker กรุณาเปิด Docker Desktop ก่อน
+  exit /b 1
+)
+docker info >nul 2>nul || (
+  echo [ERROR] Docker ยังไม่ทำงาน กรุณาเปิด Docker Desktop แล้วรอจนพร้อม
+  exit /b 1
+)
+
+:: ---- ขั้นตอนที่ 1: ยืนยันครั้งที่ 1 ----
+echo.
+echo  ════════════════════════════════════════
+echo   ขั้นตอนการยืนยัน 1/3
+echo  ════════════════════════════════════════
+echo.
+set /p CONFIRM1="  พิมพ์ YES เพื่อยืนยันว่าต้องการลบข้อมูลทั้งหมด: "
+if /i not "!CONFIRM1!"=="YES" (
+  echo.
+  echo   ยกเลิกการดำเนินการ ไม่มีข้อมูลถูกลบ
+  echo.
+  pause
+  exit /b 0
+)
+
+:: ---- ขั้นตอนที่ 2: พิมพ์ข้อความยืนยัน ----
+echo.
+echo  ════════════════════════════════════════
+echo   ขั้นตอนการยืนยัน 2/3
+echo  ════════════════════════════════════════
+echo.
+echo   เพื่อยืนยันว่าเข้าใจว่าข้อมูลจะถูกลบถาวร
+echo   กรุณาพิมพ์ข้อความต่อไปนี้ให้ตรงทุกตัวอักษร:
+echo.
+echo     DELETE ALL PATIENT DATA
+echo.
+set /p CONFIRM2="  พิมพ์ข้อความยืนยัน: "
+if not "!CONFIRM2!"=="DELETE ALL PATIENT DATA" (
+  echo.
+  echo   ข้อความไม่ตรง ยกเลิกการดำเนินการ ไม่มีข้อมูลถูกลบ
+  echo.
+  pause
+  exit /b 0
+)
+
+:: ---- ขั้นตอนที่ 3: นับถอยหลัง ----
+echo.
+echo  ════════════════════════════════════════
+echo   ขั้นตอนการยืนยัน 3/3 — นับถอยหลัง
+echo  ════════════════════════════════════════
+echo.
+echo   กดกำลังจะลบข้อมูลทั้งหมด...
+echo   กด Ctrl+C ภายใน 10 วินาทีเพื่อยกเลิก
+echo.
+for /L %%i in (10,-1,1) do (
+  echo   %%i...
+  timeout /t 1 >nul
+)
+echo.
+echo   เริ่มลบข้อมูล...
+echo.
+
+:: ---- หยุด containers ก่อน ----
+echo [STEP 1/5] หยุด containers...
+docker compose down 2>nul
+echo.
+
+:: ---- ลบ Docker volumes ----
+echo [STEP 2/5] ลบ Docker volumes...
+docker volume rm seamlessfordmis_postgres_data 2>nul && echo         ลบ postgres_data สำเร็จ || echo         [!] ไม่พบ volume postgres_data (อาจถูกลบแล้ว)
+docker volume rm seamlessfordmis_source_data   2>nul && echo         ลบ source_data สำเร็จ   || echo         [!] ไม่พบ volume source_data
+docker volume rm seamlessfordmis_uploads       2>nul && echo         ลบ uploads สำเร็จ       || echo         [!] ไม่พบ volume uploads
+docker volume rm seamlessfordmis_reports       2>nul && echo         ลบ reports สำเร็จ       || echo         [!] ไม่พบ volume reports
+docker volume rm seamlessfordmis_logs          2>nul && echo         ลบ logs สำเร็จ          || echo         [!] ไม่พบ volume logs
+echo.
+
+:: ---- ลบ data\backups\ ----
+echo [STEP 3/5] ลบข้อมูลสำรองใน data\backups\...
+if exist "data\backups" (
+  rd /s /q "data\backups" 2>nul
+  if not exist "data\backups" (
+    echo         ลบ data\backups\ สำเร็จ
+  ) else (
+    echo         [!] ไม่สามารถลบ data\backups\ ได้ทั้งหมด อาจมีไฟล์ถูกล็อก
+  )
+) else (
+  echo         [!] ไม่พบโฟลเดอร์ data\backups\ (อาจถูกลบแล้ว)
+)
+echo.
+
+:: ---- ลบ .env ----
+echo [STEP 4/5] ลบ .env...
+if exist ".env" (
+  del /f ".env" 2>nul && echo         ลบ .env สำเร็จ || echo         [!] ไม่สามารถลบ .env ได้
+) else (
+  echo         [!] ไม่พบ .env
+)
+echo.
+
+:: ---- สรุป ----
+echo [STEP 5/5] สรุปผล...
+echo.
+echo  ════════════════════════════════════════════════════
+echo   การลบข้อมูลเสร็จสิ้น
+echo  ════════════════════════════════════════════════════
+echo.
+echo   Docker volumes ที่ถูกลบ:
+docker volume ls --filter name=seamlessfordmis 2>nul | findstr seamlessfordmis >nul 2>nul
+if errorlevel 1 (
+  echo     ไม่มี seamlessfordmis volumes เหลืออยู่ ✓
+) else (
+  echo     [!] ยังมี volume บางอัน — ตรวจสอบด้วย: docker volume ls
+)
+echo.
+echo   หากต้องการติดตั้งระบบใหม่:
+echo     1. รัน offline\install.bat
+echo.
+pause
