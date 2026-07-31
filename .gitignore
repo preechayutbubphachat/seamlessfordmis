@@ -89,6 +89,8 @@ data/**
 !data/
 !data/README.md
 exports/
+!web-laravel/resources/views/exports/
+!web-laravel/resources/views/exports/**
 reports/
 backups/
 parsed_cache/
@@ -100,3 +102,6 @@ backend/.venv/
 **/node_modules/
 web/.next/
 web/out/
+
+# --- Project Brain privacy containment (raw intake is never staged by default) ---
+/AI-Brains/raw/**
