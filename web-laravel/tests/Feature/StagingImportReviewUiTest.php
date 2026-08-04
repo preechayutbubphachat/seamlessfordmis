@@ -14,6 +14,11 @@ final class StagingImportReviewUiTest extends TestCase
 {
     use RefreshDatabase;
 
+    private function csvFile(string $content): UploadedFile
+    {
+        return UploadedFile::fake()->createWithContent('synthetic.csv', $content);
+    }
+
     public function test_source_import_list_returns_success_with_empty_state(): void
     {
         $this->get('/imports/source-files')
@@ -80,17 +85,67 @@ final class StagingImportReviewUiTest extends TestCase
             ->assertDontSee('Delete');
     }
 
-    public function test_import_post_routes_still_return_501_and_store_no_files(): void
+    public function test_source_import_post_uses_functional_import_contract(): void
     {
         Storage::fake('local');
 
-        $this->post('/imports/source-files', [
-            'file' => UploadedFile::fake()->create('blocked.txt', 1, 'text/plain'),
+        // Valid source import should be accepted and staged
+        $response = $this->post('/imports/source-files', [
+            'files' => [
+                $this->csvFile("cid,service_key\n1234567890121,SYN_ALPHA"),
+            ],
+        ]);
+
+        $response
+            ->assertOk()
+            ->assertJsonStructure([
+                'message',
+                'source_import_job_id',
+                'source_file_ids',
+                'sha256',
+                'rows_inserted',
+                'status',
+                'reconciliation',
+                'file_stored',
+                'patient_data_imported',
+            ])
+            ->assertJson([
+                'message' => 'Source import completed successfully.',
+                'file_stored' => true,
+                'patient_data_imported' => false,
+                'status' => 'completed',
+            ]);
+
+        $this->assertDatabaseCount('source_import_jobs', 1);
+        $this->assertDatabaseCount('source_import_files', 1);
+        $this->assertDatabaseCount('source_import_rows', 1);
+
+        // Target groups route still returns 501 (not implemented in this slice)
+        $this->post('/imports/target-groups', [
+            'files' => [
+                $this->csvFile("cid,marker\n1234567890121,SYN_ALPHA"),
+            ],
         ])->assertStatus(501);
 
-        $this->post('/imports/target-groups', [
-            'file' => UploadedFile::fake()->create('blocked.txt', 1, 'text/plain'),
-        ])->assertStatus(501);
+        Storage::disk('local')->assertMissing('blocked.txt');
+        Storage::disk('local')->assertMissing('imports/blocked.txt');
+    }
+
+    public function test_source_import_post_rejects_invalid_request_without_persistence(): void
+    {
+        Storage::fake('local');
+
+        // Old 'file' key (not 'files' array) should be rejected with 302 redirect + session errors
+        $response = $this->post('/imports/source-files', [
+            'file' => $this->csvFile("cid,service_key\n1234567890121,SYN_ALPHA"),
+        ]);
+
+        $response->assertStatus(302);
+        $response->assertSessionHasErrors('files');
+
+        $this->assertDatabaseCount('source_import_jobs', 0);
+        $this->assertDatabaseCount('source_import_files', 0);
+        $this->assertDatabaseCount('source_import_rows', 0);
 
         Storage::disk('local')->assertMissing('blocked.txt');
         Storage::disk('local')->assertMissing('imports/blocked.txt');

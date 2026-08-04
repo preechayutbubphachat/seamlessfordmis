@@ -7,11 +7,13 @@ use App\Http\Requests\StoreSourceImportRequest;
 use App\Http\Requests\PreviewCsvImportRequest;
 use App\Services\Audit\AuditLogger;
 use App\Services\Import\ImportPreviewService;
+use App\Services\Import\SourceImportService;
 use App\Services\Import\StagingImportService;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use LogicException;
 
 final class SourceImportController extends Controller
@@ -65,9 +67,67 @@ final class SourceImportController extends Controller
         ]);
     }
 
-    public function store(StoreSourceImportRequest $request): JsonResponse
+    public function store(StoreSourceImportRequest $request, SourceImportService $sourceImportService): JsonResponse
     {
-        return $this->importNotEnabled();
+        $files = $request->file('files', []);
+
+        // Validate that all files are CSV
+        foreach ($files as $file) {
+            $extension = strtolower($file->getClientOriginalExtension());
+            if ($extension !== 'csv') {
+                return $this->importNotEnabled();
+            }
+        }
+
+        // If no files passed validation, return not enabled
+        if ($files === []) {
+            return $this->importNotEnabled();
+        }
+
+        try {
+            $result = $sourceImportService->stage($files);
+
+            return response()->json([
+                'message' => 'Source import completed successfully.',
+                'source_import_job_id' => $result['source_import_job_id'],
+                'source_file_ids' => $result['source_file_ids'],
+                'sha256' => $result['sha256'],
+                'rows_inserted' => $result['rows_inserted'],
+                'status' => $result['status'],
+                'reconciliation' => $result['reconciliation'],
+                'file_stored' => true,
+                'patient_data_imported' => false,
+            ]);
+        } catch (LogicException $e) {
+            return response()->json([
+                'message' => $e->getMessage(),
+                'file_stored' => false,
+                'patient_data_imported' => false,
+            ], 422);
+        } catch (\InvalidArgumentException $e) {
+            return response()->json([
+                'message' => $e->getMessage(),
+                'file_stored' => false,
+                'patient_data_imported' => false,
+            ], 422);
+        } catch (\Throwable $e) {
+            // TEMPORARY: Log the actual exception for debugging
+            \Illuminate\Support\Facades\Log::error('SourceImportController::store exception', [
+                'class' => get_class($e),
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+            // Clean up any temp files on unexpected error
+            $this->cleanupTempImports();
+
+            return response()->json([
+                'message' => 'Import failed: ' . $e->getMessage(),
+                'file_stored' => false,
+                'patient_data_imported' => false,
+            ], 500);
+        }
     }
 
     public function previewForm(): View
@@ -155,5 +215,12 @@ final class SourceImportController extends Controller
         return redirect()
             ->route('imports.source-files.show', ['job' => $result['source_import_job_id']])
             ->with('status', 'Preview committed to staging.');
+    }
+
+    private function cleanupTempImports(): void
+    {
+        if (Storage::disk('local')->exists('imports/temp')) {
+            Storage::disk('local')->deleteDirectory('imports/temp');
+        }
     }
 }

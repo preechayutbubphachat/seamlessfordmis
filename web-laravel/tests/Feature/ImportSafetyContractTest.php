@@ -12,6 +12,11 @@ final class ImportSafetyContractTest extends TestCase
 {
     use RefreshDatabase;
 
+    private function csvFile(string $content): UploadedFile
+    {
+        return UploadedFile::fake()->createWithContent('synthetic.csv', $content);
+    }
+
     public function test_import_placeholder_routes_return_success_without_patient_data(): void
     {
         $this->get('/imports/source-files')
@@ -42,21 +47,83 @@ final class ImportSafetyContractTest extends TestCase
         Storage::fake('local');
 
         $response = $this->post('/imports/source-files', [
-            'file' => UploadedFile::fake()->create('blocked.txt', 1, 'text/plain'),
+            'files' => [
+                $this->csvFile("cid,service_key\n1234567890121,SYN_ALPHA"),
+            ],
         ]);
 
         $response
-            ->assertStatus(501)
+            ->assertOk()
+            ->assertJsonStructure([
+                'message',
+                'source_import_job_id',
+                'source_file_ids',
+                'sha256',
+                'rows_inserted',
+                'status',
+                'reconciliation',
+                'file_stored',
+                'patient_data_imported',
+            ])
             ->assertJson([
-                'message' => 'Import execution is not enabled in W4.',
-                'file_stored' => false,
+                'message' => 'Source import completed successfully.',
+                'file_stored' => true,
                 'patient_data_imported' => false,
+                'status' => 'completed',
             ]);
 
+        $this->assertDatabaseCount('source_import_jobs', 1);
+        $this->assertDatabaseCount('source_import_files', 1);
+        $this->assertDatabaseCount('source_import_rows', 1);
+
+        $job = DB::table('source_import_jobs')->first();
+        $this->assertSame('completed', $job->status);
+        $this->assertSame(1, $job->total_files);
+        $this->assertSame(1, $job->total_rows);
+        $this->assertSame(1, $job->valid_rows);
+        $this->assertSame(0, $job->invalid_rows);
+        $this->assertSame(0, $job->review_rows);
+
         Storage::disk('local')->assertMissing('blocked.txt');
-        $this->assertSame(0, DB::table('source_import_jobs')->count());
-        $this->assertSame(0, DB::table('source_import_files')->count());
-        $this->assertSame(0, DB::table('source_import_rows')->count());
+        Storage::disk('local')->assertMissing('imports/blocked.txt');
+    }
+
+    public function test_source_import_post_rejects_invalid_request_without_persistence(): void
+    {
+        Storage::fake('local');
+
+        // Missing 'files' array (old 'file' key) - FormRequest validation rejects with 302 redirect + session errors
+        $response = $this->post('/imports/source-files', [
+            'file' => $this->csvFile("cid,service_key\n1234567890121,SYN_ALPHA"),
+        ]);
+
+        $response->assertStatus(302);
+        $response->assertSessionHasErrors('files');
+
+        $this->assertDatabaseCount('source_import_jobs', 0);
+        $this->assertDatabaseCount('source_import_files', 0);
+        $this->assertDatabaseCount('source_import_rows', 0);
+
+        // Non-CSV file - FormRequest passes (allows text/plain), controller returns 501
+        $response = $this->post('/imports/source-files', [
+            'files' => [
+                UploadedFile::fake()->create('blocked.txt', 1, 'text/plain'),
+            ],
+        ]);
+
+        $response->assertStatus(501);
+        $response->assertJson([
+            'message' => 'Import execution is not enabled in W4.',
+            'file_stored' => false,
+            'patient_data_imported' => false,
+        ]);
+
+        $this->assertDatabaseCount('source_import_jobs', 0);
+        $this->assertDatabaseCount('source_import_files', 0);
+        $this->assertDatabaseCount('source_import_rows', 0);
+
+        Storage::disk('local')->assertMissing('blocked.txt');
+        Storage::disk('local')->assertMissing('imports/blocked.txt');
     }
 
     public function test_target_group_import_post_is_blocked_and_stores_no_file_or_rows(): void
