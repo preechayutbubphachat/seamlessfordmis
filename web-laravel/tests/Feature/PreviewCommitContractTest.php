@@ -86,36 +86,24 @@ final class PreviewCommitContractTest extends TestCase
         $this->assertNoResultExportOrStorageSideEffects();
     }
 
-    public function test_confirmed_target_group_preview_commits_staging_rows_and_preserves_invalid_missing_statuses(): void
+    public function test_confirmed_target_group_preview_is_blocked_without_durable_persistence(): void
     {
         Storage::fake('local');
         $token = $this->previewToken('/imports/target-groups/preview', "cid,full_name,marker\n1234567890129,SYN_INVALID,RAW_B\n,SYN_MISSING,RAW_C");
 
-        $this->post('/imports/target-groups/commit-preview', [
+        $this->from('/imports/target-groups/preview')->post('/imports/target-groups/commit-preview', [
             'preview_token' => $token,
             'import_type' => 'target_group',
             'confirmed' => '1',
-        ])->assertRedirect();
+        ])->assertRedirect('/imports/target-groups/preview')
+            ->assertSessionHasErrors('preview_token');
 
-        $this->assertSame(1, DB::table('target_group_jobs')->count());
-        $this->assertSame(1, DB::table('target_group_files')->count());
-        $this->assertSame(2, DB::table('target_group_rows')->count());
-        $this->assertDatabaseHas('target_group_rows', [
-            'row_number' => 2,
-            'raw_cid' => '1234567890129',
-            'cid_status' => 'invalid_identifier',
-            'validation_status' => 'invalid_identifier',
-        ]);
-        $this->assertDatabaseHas('target_group_rows', [
-            'row_number' => 3,
-            'raw_cid' => '',
-            'cid_status' => 'missing_identifier',
-            'validation_status' => 'missing_identifier',
-        ]);
-        $this->assertDatabaseHas('audit_logs', [
-            'action' => 'import_preview_committed',
-            'entity_type' => 'target_group_job',
-        ]);
+        $this->assertSame(['TARGET_GROUP_COMMIT_NOT_IMPLEMENTED'], session('errors')->get('preview_token'));
+        $this->assertSame(0, DB::table('target_group_jobs')->count());
+        $this->assertSame(0, DB::table('target_group_files')->count());
+        $this->assertSame(0, DB::table('target_group_rows')->count());
+        $this->assertSame(0, DB::table('target_group_history_rows')->count());
+        $this->assertSame(0, DB::table('audit_logs')->where('action', 'import_preview_committed')->count());
         $this->assertNoResultExportOrStorageSideEffects();
     }
 
@@ -167,9 +155,14 @@ final class PreviewCommitContractTest extends TestCase
         $html = $response->getContent();
         preg_match('/name="preview_token" value="([a-f0-9]{64})"/', $html, $matches);
 
-        $this->assertNotEmpty($matches[1] ?? null, 'Preview token was not rendered.');
+        if (! empty($matches[1])) {
+            return $matches[1];
+        }
 
-        return $matches[1];
+        $tokens = array_keys((array) session('import_previews', []));
+        $this->assertNotEmpty($tokens, 'Preview token was not stored in session.');
+
+        return (string) end($tokens);
     }
 
     private function csvFile(string $content): UploadedFile

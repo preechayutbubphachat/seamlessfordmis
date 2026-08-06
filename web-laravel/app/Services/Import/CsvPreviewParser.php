@@ -26,12 +26,13 @@ final class CsvPreviewParser
      *     missing_identifier_rows: int,
      *     errors: list<array<string, mixed>>,
      *     warnings: list<array<string, mixed>>,
-     *     rows: list<array<string, mixed>>
+     *     rows: list<array<string, mixed>>,
+     *     header_mapping: array<string, string|null>
      * }
      */
-    public function parseString(string $csvContent, array $requiredColumns = ['cid']): array
+    public function parseString(string $csvContent, array $requiredColumns = ['cid'], string $importType = 'source'): array
     {
-        return $this->streamingParser->parseString($csvContent, $requiredColumns);
+        return $this->streamingParser->parseString($csvContent, $requiredColumns, $importType);
     }
 
     /**
@@ -43,11 +44,12 @@ final class CsvPreviewParser
      *     missing_identifier_rows: int,
      *     errors: list<array<string, mixed>>,
      *     warnings: list<array<string, mixed>>,
-     *     rows: list<array<string, mixed>>
+     *     rows: list<array<string, mixed>>,
+     *     header_mapping: array<string, string|null>
      * }
      */
-    public function parseFile(string $path, array $requiredColumns = ['cid']): array
+    public function parseFile(string $path, array $requiredColumns = ['cid'], string $importType = 'source'): array
     {
-        return $this->streamingParser->parseFile($path, $requiredColumns);
+        return $this->streamingParser->parseFile($path, $requiredColumns, $importType);
     }
 }

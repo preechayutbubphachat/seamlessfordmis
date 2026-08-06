@@ -48,9 +48,10 @@ final class ImportPreviewUploadTest extends TestCase
     public function test_target_group_preview_shows_invalid_and_missing_identifier_statuses(): void
     {
         Storage::fake('local');
+        $before = $this->tableCounts();
 
         $response = $this->post('/imports/target-groups/preview', [
-            'file' => $this->csvFile("cid,marker\n1234567890129,SYN_INVALID\n,SYN_MISSING"),
+            'file' => $this->csvFile("cid,full_name,marker\n1234567890129,SYN_NAME,SYN_INVALID\n,SYN_NAME,SYN_MISSING"),
         ]);
 
         $response
@@ -58,8 +59,11 @@ final class ImportPreviewUploadTest extends TestCase
             ->assertSee('invalid_identifier')
             ->assertSee('missing_identifier')
             ->assertSee('SYN_INVALID')
-            ->assertSee('SYN_MISSING');
+            ->assertSee('SYN_MISSING')
+            ->assertSee('DURABLE_COMMIT_AVAILABLE: NO')
+            ->assertSee('การแสดงตัวอย่าง Target Group เป็นแบบอ่านอย่างเดียว');
 
+        $this->assertSame($before, $this->tableCounts());
         $this->assertNoPreviewSideEffects();
     }
 

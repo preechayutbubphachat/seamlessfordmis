@@ -5,14 +5,11 @@ namespace App\Http\Controllers;
 use App\Http\Requests\CommitPreviewImportRequest;
 use App\Http\Requests\PreviewCsvImportRequest;
 use App\Http\Requests\StoreTargetGroupImportRequest;
-use App\Services\Audit\AuditLogger;
 use App\Services\Import\ImportPreviewService;
-use App\Services\Import\StagingImportService;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\DB;
-use LogicException;
 
 final class TargetGroupImportController extends Controller
 {
@@ -87,7 +84,7 @@ final class TargetGroupImportController extends Controller
     {
         $file = $request->file('file');
         $path = (string) $file->getRealPath();
-        $preview = $previewService->previewCsvFile($path, ['cid']);
+        $preview = $previewService->previewCsvFile($path, ['cid', 'full_name'], 'target_group');
         $sha256 = hash_file('sha256', $path);
         $previewToken = hash('sha256', 'target_group|'.$sha256.'|'.microtime(true));
 
@@ -111,49 +108,9 @@ final class TargetGroupImportController extends Controller
 
     public function commitPreview(
         CommitPreviewImportRequest $request,
-        StagingImportService $stagingImportService,
-        AuditLogger $auditLogger,
     ): RedirectResponse {
-        $token = (string) $request->input('preview_token');
-        $entry = session('import_previews.'.$token);
-
-        if (! is_array($entry) || ($entry['import_type'] ?? null) !== 'target_group') {
-            return back()->withErrors(['preview_token' => 'Preview token is missing or expired.']);
-        }
-
-        if (($entry['preview']['errors'] ?? []) !== []) {
-            return back()->withErrors(['preview_token' => 'Preview with errors cannot be committed.']);
-        }
-
-        try {
-            $result = DB::transaction(function () use ($entry, $request, $stagingImportService, $auditLogger): array {
-                $result = $stagingImportService->persistTargetGroupPreview($entry['preview'], [
-                    'group_name' => 'Committed target group preview',
-                    'original_filename' => $entry['original_filename'] ?? 'synthetic-preview.csv',
-                    'sha256' => $entry['sha256'],
-                ]);
-
-                $auditLogger->log('import_preview_committed', 'target_group_job', $result['target_group_job_id'], [
-                    'ip_address' => $request->ip(),
-                    'user_agent' => $request->userAgent(),
-                    'after_payload' => [
-                        'import_type' => 'target_group',
-                        'sha256' => $result['sha256'],
-                        'rows_inserted' => $result['rows_inserted'],
-                        'file_stored' => false,
-                    ],
-                ]);
-
-                return $result;
-            });
-        } catch (LogicException $exception) {
-            return back()->withErrors(['preview_token' => $exception->getMessage()]);
-        }
-
-        session()->forget('import_previews.'.$token);
-
         return redirect()
-            ->route('imports.target-groups.show', ['job' => $result['target_group_job_id']])
-            ->with('status', 'Preview committed to staging.');
+            ->route('imports.target-groups.preview')
+            ->withErrors(['preview_token' => 'TARGET_GROUP_COMMIT_NOT_IMPLEMENTED']);
     }
 }

@@ -21,7 +21,31 @@ use RuntimeException;
 final class StreamingCsvParser
 {
     /**
+     * Confirmed target-group header aliases (from discovery contract)
+     * @var array<string, list<string>>
+     */
+    private const TARGET_GROUP_HEADER_ALIASES = [
+        'cid' => ['cid'],
+        'full_name' => ['full_name', 'name'],
+        'birth_date' => ['birth_date'],
+        'service_key' => ['service_key', 'service'],
+        'service_date' => ['service_date', 'visit_date'],
+    ];
+
+    /**
+     * Confirmed source import header aliases (from discovery contract)
+     * @var array<string, list<string>>
+     */
+    private const SOURCE_IMPORT_HEADER_ALIASES = [
+        'cid' => ['cid'],
+        'service_key' => ['service_key', 'service'],
+        'service_date' => ['service_date', 'visit_date'],
+        'status' => ['status'],
+    ];
+
+    /**
      * @param list<string> $requiredColumns
+     * @param string $importType 'source' | 'target_group'
      * @return array{
      *     total_rows: int,
      *     valid_rows: int,
@@ -29,16 +53,17 @@ final class StreamingCsvParser
      *     missing_identifier_rows: int,
      *     errors: list<array<string, mixed>>,
      *     warnings: list<array<string, mixed>>,
-     *     rows: list<array<string, mixed>>
+     *     rows: list<array<string, mixed>>,
+     *     header_mapping: array<string, string|null>
      * }
      */
-    public function parseFile(string $path, array $requiredColumns = ['cid']): array
+    public function parseFile(string $path, array $requiredColumns = ['cid'], string $importType = 'source'): array
     {
         if (!is_file($path) || !is_readable($path)) {
             return $this->emptyPreview([[
                 'code' => 'file_not_readable',
                 'message' => 'CSV file is not readable.',
-            ]]);
+            ]], $requiredColumns);
         }
 
         try {
@@ -51,27 +76,65 @@ final class StreamingCsvParser
             return $this->emptyPreview([[
                 'code' => 'csv_parse_failed',
                 'message' => 'Failed to create CSV reader: '.$e->getMessage(),
-            ]]);
+            ]], $requiredColumns);
         }
 
-        $headers = $reader->getHeader();
+        try {
+            $headers = $reader->getHeader();
+        } catch (\Throwable) {
+            return $this->emptyPreview([[
+                'code' => 'missing_header',
+                'message' => 'CSV header row is required.',
+            ]], $requiredColumns);
+        }
 
         if ($headers === null || $headers === []) {
             return $this->emptyPreview([[
                 'code' => 'missing_header',
                 'message' => 'CSV header row is required.',
-            ]]);
+            ]], $requiredColumns);
         }
 
         $normalizedHeaders = $this->normalizeHeaders($headers);
-        $missingColumns = array_values(array_diff($requiredColumns, $normalizedHeaders));
+
+        // Get header aliases for the import type
+        $headerAliases = $importType === 'target_group'
+            ? self::TARGET_GROUP_HEADER_ALIASES
+            : self::SOURCE_IMPORT_HEADER_ALIASES;
+
+        // Map headers to canonical fields
+        $headerMapping = $this->mapHeaders($normalizedHeaders, $headerAliases);
+
+        $recognizedHeaderCounts = [];
+        foreach ($headerMapping as $canonicalField) {
+            if ($canonicalField !== null) {
+                $recognizedHeaderCounts[$canonicalField] = ($recognizedHeaderCounts[$canonicalField] ?? 0) + 1;
+            }
+        }
+
+        $duplicateCanonicalHeaders = array_keys(array_filter(
+            $recognizedHeaderCounts,
+            static fn (int $count): bool => $count > 1,
+        ));
+
+        if ($duplicateCanonicalHeaders !== []) {
+            return $this->emptyPreview([[
+                'code' => 'duplicate_recognized_header',
+                'columns' => $duplicateCanonicalHeaders,
+                'message' => 'A recognized CSV header is duplicated and cannot be mapped unambiguously.',
+            ]], $requiredColumns, $headerMapping);
+        }
+
+        // Check required columns (using canonical field names)
+        $canonicalHeaders = array_values(array_unique(array_filter($headerMapping, fn ($v) => $v !== null)));
+        $missingColumns = array_values(array_diff($requiredColumns, $canonicalHeaders));
 
         if ($missingColumns !== []) {
             return $this->emptyPreview([[
                 'code' => 'missing_required_columns',
                 'columns' => $missingColumns,
                 'message' => 'Required columns are missing.',
-            ]]);
+            ]], $requiredColumns, $headerMapping);
         }
 
         $rows = [];
@@ -94,7 +157,10 @@ final class StreamingCsvParser
             // Combine normalized headers with record values
             $rawPayload = $this->combineRow($normalizedHeaders, $record);
 
-            $identifier = $validator->validate($rawPayload['cid'] ?? null);
+            // Map to canonical field names
+            $canonicalPayload = $this->mapToCanonical($rawPayload, $headerMapping);
+
+            $identifier = $validator->validate($canonicalPayload['cid'] ?? null);
 
             if ($identifier['status'] === CidValidator::STATUS_VALID) {
                 $validRows++;
@@ -107,7 +173,7 @@ final class StreamingCsvParser
             $rows[] = [
                 'row_number' => $rowIndex,
                 'raw_payload' => $rawPayload,
-                'raw_cid' => $rawPayload['cid'] ?? null,
+                'raw_cid' => $canonicalPayload['cid'] ?? null,
                 'normalized_cid' => $identifier['normalized_cid'],
                 'identifier_status' => $identifier['status'],
                 'validation_status' => $identifier['status'],
@@ -122,11 +188,13 @@ final class StreamingCsvParser
             'errors' => [],
             'warnings' => [],
             'rows' => $rows,
+            'header_mapping' => $headerMapping,
         ];
     }
 
     /**
      * @param list<string> $requiredColumns
+     * @param string $importType 'source' | 'target_group'
      * @return array{
      *     total_rows: int,
      *     valid_rows: int,
@@ -134,10 +202,11 @@ final class StreamingCsvParser
      *     missing_identifier_rows: int,
      *     errors: list<array<string, mixed>>,
      *     warnings: list<array<string, mixed>>,
-     *     rows: list<array<string, mixed>>
+     *     rows: list<array<string, mixed>>,
+     *     header_mapping: array<string, string|null>
      * }
      */
-    public function parseString(string $csvContent, array $requiredColumns = ['cid']): array
+    public function parseString(string $csvContent, array $requiredColumns = ['cid'], string $importType = 'source'): array
     {
         // For backward compatibility - write to temp file and parse
         $tempPath = tempnam(sys_get_temp_dir(), 'csv_preview_');
@@ -145,12 +214,12 @@ final class StreamingCsvParser
             return $this->emptyPreview([[
                 'code' => 'temp_file_failed',
                 'message' => 'Failed to create temporary file.',
-            ]]);
+            ]], $requiredColumns, [], $importType);
         }
 
         try {
             file_put_contents($tempPath, $csvContent);
-            return $this->parseFile($tempPath, $requiredColumns);
+            return $this->parseFile($tempPath, $requiredColumns, $importType);
         } finally {
             if (is_file($tempPath)) {
                 @unlink($tempPath);
@@ -171,6 +240,46 @@ final class StreamingCsvParser
     }
 
     /**
+     * Map normalized headers to canonical fields using aliases
+     * @param list<string> $normalizedHeaders
+     * @param array<string, list<string>> $headerAliases
+     * @return array<string, string|null>
+     */
+    private function mapHeaders(array $normalizedHeaders, array $headerAliases): array
+    {
+        $mapping = [];
+        foreach ($normalizedHeaders as $header) {
+            $canonical = null;
+            foreach ($headerAliases as $canonField => $aliases) {
+                if (in_array($header, $aliases, true)) {
+                    $canonical = $canonField;
+                    break;
+                }
+            }
+            $mapping[$header] = $canonical;
+        }
+        return $mapping;
+    }
+
+    /**
+     * Map raw payload to canonical field names
+     * @param array<string, string> $rawPayload
+     * @param array<string, string|null> $headerMapping
+     * @return array<string, string>
+     */
+    private function mapToCanonical(array $rawPayload, array $headerMapping): array
+    {
+        $canonical = [];
+        foreach ($rawPayload as $header => $value) {
+            $canonicalField = $headerMapping[$header] ?? null;
+            if ($canonicalField !== null) {
+                $canonical[$canonicalField] = $value;
+            }
+        }
+        return $canonical;
+    }
+
+    /**
      * @param list<string> $headers
      * @param array<string, string> $values
      * @return array<string, string>
@@ -188,6 +297,8 @@ final class StreamingCsvParser
 
     /**
      * @param list<array<string, mixed>> $errors
+     * @param list<string> $requiredColumns
+     * @param array<string, string|null> $headerMapping
      * @return array{
      *     total_rows: int,
      *     valid_rows: int,
@@ -195,10 +306,11 @@ final class StreamingCsvParser
      *     missing_identifier_rows: int,
      *     errors: list<array<string, mixed>>,
      *     warnings: list<array<string, mixed>>,
-     *     rows: list<array<string, mixed>>
+     *     rows: list<array<string, mixed>>,
+     *     header_mapping: array<string, string|null>
      * }
      */
-    private function emptyPreview(array $errors): array
+    private function emptyPreview(array $errors, array $requiredColumns = ['cid'], array $headerMapping = [], string $importType = 'source'): array
     {
         return [
             'total_rows' => 0,
@@ -208,6 +320,7 @@ final class StreamingCsvParser
             'errors' => $errors,
             'warnings' => [],
             'rows' => [],
+            'header_mapping' => $headerMapping,
         ];
     }
 }

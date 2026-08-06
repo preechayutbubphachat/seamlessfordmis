@@ -119,4 +119,71 @@ final class CsvPreviewParserTest extends TestCase
             }
         }
     }
+
+    public function test_confirmed_target_group_alias_maps_without_enabling_proposed_aliases(): void
+    {
+        $preview = (new CsvPreviewParser())->parseString(
+            "cid,name,ชื่อ\n1234567890121,SYN_NAME,SYN_PROPOSED_ALIAS",
+            ['cid', 'full_name'],
+            'target_group',
+        );
+
+        $this->assertSame('full_name', $preview['header_mapping']['name']);
+        $this->assertArrayNotHasKey('ชื่อ', array_filter($preview['header_mapping']));
+        $this->assertNull($preview['header_mapping']['ชื่อ']);
+        $this->assertSame(1, $preview['valid_rows']);
+        $this->assertSame('SYN_PROPOSED_ALIAS', $preview['rows'][0]['raw_payload']['ชื่อ']);
+    }
+
+    public function test_proposed_full_name_validation_rule_is_not_enforced_by_preview(): void
+    {
+        $preview = (new CsvPreviewParser())->parseString(
+            "cid,full_name\n1234567890121,",
+            ['cid', 'full_name'],
+            'target_group',
+        );
+
+        $this->assertSame(1, $preview['valid_rows']);
+        $this->assertSame([], $preview['errors']);
+        $this->assertSame('', $preview['rows'][0]['raw_payload']['full_name']);
+    }
+
+    public function test_duplicate_recognized_header_is_a_blocking_preview_error(): void
+    {
+        $preview = (new CsvPreviewParser())->parseString(
+            "cid,full_name,name\n1234567890121,SYN_NAME,SYN_DUPLICATE",
+            ['cid', 'full_name'],
+            'target_group',
+        );
+
+        $this->assertSame(0, $preview['total_rows']);
+        $this->assertSame('duplicate_recognized_header', $preview['errors'][0]['code']);
+        $this->assertSame(['full_name'], $preview['errors'][0]['columns']);
+    }
+
+    public function test_streaming_csv_preview_preserves_quoted_delimiters_escaped_quotes_multiline_and_utf8(): void
+    {
+        $preview = (new CsvPreviewParser())->parseString(
+            "cid,full_name,marker\n1234567890121,\"บุคคล, \\\"ตัวอย่าง\\\"\nบรรทัดสอง\",SYN_MARKER",
+            ['cid', 'full_name'],
+            'target_group',
+        );
+
+        $this->assertSame(1, $preview['total_rows']);
+        $this->assertSame(1, $preview['valid_rows']);
+        $this->assertSame(2, $preview['rows'][0]['row_number']);
+        $this->assertSame("บุคคล, \\\"ตัวอย่าง\\\"\nบรรทัดสอง", $preview['rows'][0]['raw_payload']['full_name']);
+        $this->assertSame('SYN_MARKER', $preview['rows'][0]['raw_payload']['marker']);
+    }
+
+    public function test_empty_and_header_only_csv_are_read_only_previews(): void
+    {
+        $empty = (new CsvPreviewParser())->parseString('', ['cid'], 'target_group');
+        $headerOnly = (new CsvPreviewParser())->parseString("cid,full_name\n", ['cid', 'full_name'], 'target_group');
+
+        $this->assertSame('missing_header', $empty['errors'][0]['code']);
+        $this->assertSame(0, $headerOnly['total_rows']);
+        $this->assertSame([], $headerOnly['errors']);
+        $this->assertSame([], $headerOnly['rows']);
+    }
 }
