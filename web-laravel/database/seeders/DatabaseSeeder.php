@@ -2,6 +2,8 @@
 
 namespace Database\Seeders;
 
+use App\Models\Permission;
+use App\Models\Role;
 use App\Models\User;
 use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
@@ -21,5 +23,27 @@ class DatabaseSeeder extends Seeder
             'name' => 'Test User',
             'email' => 'test@example.com',
         ]);
+
+        $role = Role::firstOrCreate([
+            'name' => 'target-group-reviewer',
+        ], [
+            'display_name' => 'Target-group reviewer',
+        ]);
+
+        foreach ([
+            'import.targetgroup.review.view',
+            'import.targetgroup.identity.view',
+            'import.targetgroup.review.approve',
+            'import.targetgroup.review.reject',
+            'audit.targetgroup.view',
+        ] as $permissionName) {
+            $permission = Permission::firstOrCreate([
+                'name' => $permissionName,
+            ], [
+                'display_name' => $permissionName,
+            ]);
+
+            $role->permissions()->syncWithoutDetaching($permission->id);
+        }
     }
 }

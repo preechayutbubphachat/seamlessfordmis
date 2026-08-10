@@ -23,6 +23,16 @@ final class TargetGroupRow extends Model
         'normalized_birth_date',
         'validation_status',
         'review_reason',
+        'review_status',
+        'review_reason_code',
+        'review_outcome',
+        'reviewed_by',
+        'reviewed_at',
+        'matching_key_type',
+        'matching_key_version',
+        'normalization_version',
+        'validation_version',
+        'conflict_flags',
     ];
 
     public function job(): BelongsTo
@@ -40,11 +50,18 @@ final class TargetGroupRow extends Model
         return $this->hasMany(TargetGroupHistoryRow::class);
     }
 
+    public function reviewEvents(): HasMany
+    {
+        return $this->hasMany(TargetGroupRowReview::class, 'target_group_row_id');
+    }
+
     protected function casts(): array
     {
         return [
             'raw_payload' => 'array',
             'normalized_birth_date' => 'date',
+            'conflict_flags' => 'array',
+            'reviewed_at' => 'datetime',
         ];
     }
 }

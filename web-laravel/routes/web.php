@@ -6,6 +6,7 @@ use App\Http\Controllers\SourceImportController;
 use App\Http\Controllers\TargetGroupController;
 use App\Http\Controllers\TargetGroupImportController;
 use App\Http\Controllers\TargetGroupResultsController;
+use App\Http\Controllers\TargetGroupReviewController;
 use Illuminate\Support\Facades\Route;
 
 Route::middleware('guest')->group(function (): void {
@@ -85,3 +86,21 @@ Route::post('/target-groups/{id}/generate-results', [TargetGroupController::clas
 Route::get('/target-groups/{id}/results', [TargetGroupResultsController::class, 'index'])
     ->whereNumber('id')
     ->name('target-groups.results');
+
+Route::middleware(['auth', 'permission:import.targetgroup.review.view'])->group(function (): void {
+    Route::get('/target-groups/review', [TargetGroupReviewController::class, 'index'])
+        ->name('target-groups.review');
+    Route::get('/target-groups/review/{id}', [TargetGroupReviewController::class, 'show'])
+        ->whereNumber('id')
+        ->name('target-groups.review.show');
+});
+
+Route::post('/target-groups/review/{id}/approve', [TargetGroupReviewController::class, 'approve'])
+    ->whereNumber('id')
+    ->middleware(['auth', 'permission:import.targetgroup.review.approve'])
+    ->name('target-groups.review.approve');
+
+Route::post('/target-groups/review/{id}/reject', [TargetGroupReviewController::class, 'reject'])
+    ->whereNumber('id')
+    ->middleware(['auth', 'permission:import.targetgroup.review.reject'])
+    ->name('target-groups.review.reject');

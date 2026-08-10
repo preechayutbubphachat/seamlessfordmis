@@ -19,6 +19,17 @@ final class AuditLog extends Model
         'before_payload',
         'after_payload',
         'created_at',
+        'correlation_id',
+        'target_group_job_id',
+        'target_group_file_id',
+        'target_group_row_id',
+        'matching_key_type',
+        'matching_key_version',
+        'review_reason_code',
+        'review_outcome',
+        'conflict_flags',
+        'reviewed_by',
+        'reviewed_at',
     ];
 
     public function actor(): BelongsTo
@@ -31,7 +42,9 @@ final class AuditLog extends Model
         return [
             'before_payload' => 'array',
             'after_payload' => 'array',
+            'conflict_flags' => 'array',
             'created_at' => 'datetime',
+            'reviewed_at' => 'datetime',
         ];
     }
 }
