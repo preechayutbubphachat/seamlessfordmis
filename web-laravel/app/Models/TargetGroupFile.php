@@ -17,11 +17,17 @@ final class TargetGroupFile extends Model
         'sha256',
         'sheet_count',
         'row_count',
+        'content_object_id',
     ];
 
     public function job(): BelongsTo
     {
         return $this->belongsTo(TargetGroupJob::class, 'target_group_job_id');
+    }
+
+    public function contentObject(): BelongsTo
+    {
+        return $this->belongsTo(ImportContentObject::class, 'content_object_id');
     }
 
     public function rows(): HasMany
@@ -32,5 +38,10 @@ final class TargetGroupFile extends Model
     public function historyRows(): HasMany
     {
         return $this->hasMany(TargetGroupHistoryRow::class);
+    }
+
+    public function versions(): HasMany
+    {
+        return $this->hasMany(TargetGroupFileVersion::class, 'target_group_file_id');
     }
 }
