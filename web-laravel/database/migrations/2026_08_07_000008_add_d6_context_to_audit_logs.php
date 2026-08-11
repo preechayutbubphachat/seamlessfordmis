@@ -31,6 +31,8 @@ return new class extends Migration
             $table->dropForeign(['target_group_file_id']);
             $table->dropForeign(['target_group_row_id']);
             $table->dropForeign(['reviewed_by']);
+            $table->dropIndex(['correlation_id']);
+            $table->dropIndex(['review_reason_code']);
             $table->dropIndex(['target_group_row_id', 'created_at']);
             $table->dropColumn([
                 'correlation_id',

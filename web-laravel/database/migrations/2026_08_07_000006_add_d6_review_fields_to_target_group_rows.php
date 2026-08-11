@@ -27,6 +27,8 @@ return new class extends Migration
     {
         Schema::table('target_group_rows', function (Blueprint $table): void {
             $table->dropForeign(['reviewed_by']);
+            $table->dropIndex(['review_status']);
+            $table->dropIndex(['review_reason_code']);
             $table->dropIndex(['review_status', 'target_group_job_id']);
             $table->dropColumn([
                 'review_status',
