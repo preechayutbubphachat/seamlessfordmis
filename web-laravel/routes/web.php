@@ -46,26 +46,67 @@ $placeholderPages = [
 ];
 
 foreach ($placeholderPages as $uri => $page) {
-    Route::get($uri, fn () => view('admin.placeholder', ['page' => $page]))->name($page['name']);
+    $permission = match ($uri) {
+        '/dashboard' => 'dashboard.view',
+        '/settings/disease-services' => 'settings.disease.service.view',
+        '/audit-logs' => 'audit.log.view',
+        default => 'targetgroup.view',
+    };
+
+    Route::get($uri, fn () => view('admin.placeholder', ['page' => $page]))
+        ->middleware(['auth', 'permission:'.$permission])
+        ->name($page['name']);
 }
 
-Route::get('/imports/source-files', [SourceImportController::class, 'index'])->name('imports.source-files');
-Route::get('/imports/source-files/preview', [SourceImportController::class, 'previewForm'])->name('imports.source-files.preview');
-Route::post('/imports/source-files/preview', [SourceImportController::class, 'preview'])->name('imports.source-files.preview.store');
-Route::post('/imports/source-files/commit-preview', [SourceImportController::class, 'commitPreview'])->name('imports.source-files.preview.commit');
-Route::post('/imports/source-files', [SourceImportController::class, 'store'])->name('imports.source-files.store');
-Route::get('/imports/source-files/{job}', [SourceImportController::class, 'show'])->whereNumber('job')->name('imports.source-files.show');
+Route::get('/imports/source-files', [SourceImportController::class, 'index'])
+    ->middleware(['auth', 'permission:import.source.view'])
+    ->name('imports.source-files');
+Route::get('/imports/source-files/preview', [SourceImportController::class, 'previewForm'])
+    ->middleware(['auth', 'permission:import.source.preview'])
+    ->name('imports.source-files.preview');
+Route::post('/imports/source-files/preview', [SourceImportController::class, 'preview'])
+    ->middleware(['auth', 'permission:import.source.preview'])
+    ->name('imports.source-files.preview.store');
+Route::post('/imports/source-files/commit-preview', [SourceImportController::class, 'commitPreview'])
+    ->middleware(['auth', 'permission:import.source.commit'])
+    ->name('imports.source-files.preview.commit');
+Route::post('/imports/source-files', [SourceImportController::class, 'store'])
+    ->middleware(['auth', 'permission:import.source.commit'])
+    ->name('imports.source-files.store');
+Route::get('/imports/source-files/{job}', [SourceImportController::class, 'show'])
+    ->whereNumber('job')
+    ->middleware(['auth', 'permission:import.source.view'])
+    ->name('imports.source-files.show');
 
-Route::get('/imports/target-groups', [TargetGroupImportController::class, 'index'])->name('imports.target-groups');
-Route::get('/imports/target-groups/preview', [TargetGroupImportController::class, 'previewForm'])->name('imports.target-groups.preview');
-Route::post('/imports/target-groups/preview', [TargetGroupImportController::class, 'preview'])->name('imports.target-groups.preview.store');
-Route::post('/imports/target-groups/commit-preview', [TargetGroupImportController::class, 'commitPreview'])->name('imports.target-groups.preview.commit');
-Route::post('/imports/target-groups', [TargetGroupImportController::class, 'store'])->name('imports.target-groups.store');
-Route::get('/imports/target-groups/{job}', [TargetGroupImportController::class, 'show'])->whereNumber('job')->name('imports.target-groups.show');
+Route::get('/imports/target-groups', [TargetGroupImportController::class, 'index'])
+    ->middleware(['auth', 'permission:import.targetgroup.view'])
+    ->name('imports.target-groups');
+Route::get('/imports/target-groups/preview', [TargetGroupImportController::class, 'previewForm'])
+    ->middleware(['auth', 'permission:import.targetgroup.preview'])
+    ->name('imports.target-groups.preview');
+Route::post('/imports/target-groups/preview', [TargetGroupImportController::class, 'preview'])
+    ->middleware(['auth', 'permission:import.targetgroup.preview'])
+    ->name('imports.target-groups.preview.store');
+Route::post('/imports/target-groups/commit-preview', [TargetGroupImportController::class, 'commitPreview'])
+    ->middleware(['auth', 'permission:import.targetgroup.commit'])
+    ->name('imports.target-groups.preview.commit');
+Route::post('/imports/target-groups', [TargetGroupImportController::class, 'store'])
+    ->middleware(['auth', 'permission:import.targetgroup.commit'])
+    ->name('imports.target-groups.store');
+Route::get('/imports/target-groups/{job}', [TargetGroupImportController::class, 'show'])
+    ->whereNumber('job')
+    ->middleware(['auth', 'permission:import.targetgroup.view'])
+    ->name('imports.target-groups.show');
 
-Route::get('/exports', [ExportController::class, 'index'])->name('exports.index');
-Route::get('/exports/preview', [ExportController::class, 'previewForm'])->name('exports.preview');
-Route::post('/exports/preview', [ExportController::class, 'preview'])->name('exports.preview.store');
+Route::get('/exports', [ExportController::class, 'index'])
+    ->middleware(['auth', 'permission:export.view'])
+    ->name('exports.index');
+Route::get('/exports/preview', [ExportController::class, 'previewForm'])
+    ->middleware(['auth', 'permission:export.preview'])
+    ->name('exports.preview');
+Route::post('/exports/preview', [ExportController::class, 'preview'])
+    ->middleware(['auth', 'permission:export.preview'])
+    ->name('exports.preview.store');
 Route::post('/exports/generate', [ExportController::class, 'generate'])
     ->middleware(['auth', 'permission:export.generate'])
     ->name('exports.generate');
@@ -73,18 +114,23 @@ Route::get('/exports/{exportJob}/download', [ExportController::class, 'download'
     ->whereNumber('exportJob')
     ->middleware(['auth', 'permission:export.download'])
     ->name('exports.download');
-Route::post('/exports', [ExportController::class, 'store'])->name('exports.store');
+Route::post('/exports', [ExportController::class, 'store'])
+    ->middleware(['auth', 'permission:export.generate'])
+    ->name('exports.store');
 
 Route::get('/target-groups/{id}', [TargetGroupController::class, 'show'])
     ->whereNumber('id')
+    ->middleware(['auth', 'permission:targetgroup.view'])
     ->name('target-groups.show');
 
 Route::post('/target-groups/{id}/generate-results', [TargetGroupController::class, 'generateResults'])
     ->whereNumber('id')
+    ->middleware(['auth', 'permission:targetgroup.result.generate'])
     ->name('target-groups.generate-results');
 
 Route::get('/target-groups/{id}/results', [TargetGroupResultsController::class, 'index'])
     ->whereNumber('id')
+    ->middleware(['auth', 'permission:targetgroup.result.view'])
     ->name('target-groups.results');
 
 Route::middleware(['auth', 'permission:import.targetgroup.review.view'])->group(function (): void {

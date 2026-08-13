@@ -2,6 +2,10 @@
 
 namespace Tests\Feature;
 
+use App\Models\Permission;
+use App\Models\Role;
+use App\Models\User;
+use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -10,6 +14,25 @@ use Tests\TestCase;
 final class ExportPreviewContractTest extends TestCase
 {
     use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->withoutMiddleware(PreventRequestForgery::class);
+
+        $user = User::create([
+            'name' => 'SYNTHETIC_EXPORT_PREVIEW',
+            'email' => 'synthetic-export-preview@example.invalid',
+            'password' => 'technical-test-password',
+        ]);
+        $role = Role::create(['name' => 'synthetic-export-preview-role']);
+        $user->roles()->attach($role);
+        foreach (['export.view', 'export.preview', 'export.generate'] as $name) {
+            $permission = Permission::firstOrCreate(['name' => $name]);
+            $role->permissions()->attach($permission);
+        }
+        $this->actingAs($user);
+    }
 
     public function test_export_preview_page_returns_success(): void
     {

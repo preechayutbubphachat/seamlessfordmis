@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\Permission;
 use App\Models\Role;
 use App\Models\User;
+use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
@@ -12,6 +13,12 @@ use Tests\TestCase;
 final class ExportGenerationTriggerTest extends TestCase
 {
     use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->withoutMiddleware(PreventRequestForgery::class);
+    }
 
     protected function tearDown(): void
     {
@@ -162,8 +169,10 @@ final class ExportGenerationTriggerTest extends TestCase
         ]);
         $role = Role::create(['name' => 'export-trigger-role']);
         $permission = Permission::firstOrCreate(['name' => 'export.generate']);
+        $viewPermission = Permission::firstOrCreate(['name' => 'export.view']);
         $user->roles()->attach($role);
         $role->permissions()->attach($permission);
+        $role->permissions()->attach($viewPermission);
 
         return $user;
     }

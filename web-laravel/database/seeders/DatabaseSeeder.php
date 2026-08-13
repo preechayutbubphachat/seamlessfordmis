@@ -45,5 +45,60 @@ class DatabaseSeeder extends Seeder
 
             $role->permissions()->syncWithoutDetaching($permission->id);
         }
+
+        $rolePermissions = [
+            'general-staff-read' => [
+                'dashboard.view',
+                'targetgroup.view',
+                'targetgroup.result.view',
+            ],
+            'source-import-operator' => [
+                'import.source.view',
+                'import.source.preview',
+                'import.source.commit',
+            ],
+            'target-group-import-operator' => [
+                'import.targetgroup.view',
+                'import.targetgroup.preview',
+                'import.targetgroup.commit',
+            ],
+            'result-generation-operator' => [
+                'targetgroup.result.generate',
+            ],
+            'audit-reviewer' => [
+                'audit.log.view',
+            ],
+            'export-viewer' => [
+                'export.view',
+                'export.preview',
+            ],
+            'export-generator' => [
+                'export.generate',
+            ],
+            'export-downloader' => [
+                'export.download',
+            ],
+            'settings-viewer' => [
+                'settings.disease.service.view',
+            ],
+        ];
+
+        foreach ($rolePermissions as $roleName => $permissionNames) {
+            $role = Role::firstOrCreate([
+                'name' => $roleName,
+            ], [
+                'display_name' => $roleName,
+            ]);
+
+            foreach ($permissionNames as $permissionName) {
+                $permission = Permission::firstOrCreate([
+                    'name' => $permissionName,
+                ], [
+                    'display_name' => $permissionName,
+                ]);
+
+                $role->permissions()->syncWithoutDetaching($permission->id);
+            }
+        }
     }
 }

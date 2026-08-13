@@ -2,6 +2,10 @@
 
 namespace Tests\Feature;
 
+use App\Models\Permission;
+use App\Models\Role;
+use App\Models\User;
+use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
@@ -11,6 +15,25 @@ use Tests\TestCase;
 final class PreviewCommitContractTest extends TestCase
 {
     use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->withoutMiddleware(PreventRequestForgery::class);
+
+        $user = User::create([
+            'name' => 'SYNTHETIC_PREVIEW_COMMIT',
+            'email' => 'synthetic-preview-commit@example.invalid',
+            'password' => 'technical-test-password',
+        ]);
+        $role = Role::create(['name' => 'synthetic-preview-commit-role']);
+        $user->roles()->attach($role);
+        foreach (['import.source.preview', 'import.source.commit', 'import.targetgroup.preview', 'import.targetgroup.commit'] as $name) {
+            $permission = Permission::firstOrCreate(['name' => $name]);
+            $role->permissions()->attach($permission);
+        }
+        $this->actingAs($user);
+    }
 
     public function test_preview_with_errors_cannot_commit(): void
     {

@@ -6,12 +6,19 @@ use App\Models\Permission;
 use App\Models\Role;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
 use Illuminate\Support\Facades\Route;
 use Tests\TestCase;
 
 final class ExportGenerationAuthorizationTest extends TestCase
 {
     use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->withoutMiddleware(PreventRequestForgery::class);
+    }
 
     protected function tearDown(): void
     {
@@ -49,6 +56,9 @@ final class ExportGenerationAuthorizationTest extends TestCase
     public function test_generation_form_is_hidden_without_permission_and_visible_with_persisted_permission(): void
     {
         $denied = $this->createUser('export-form-denied@example.invalid');
+        $role = Role::create(['name' => 'export-form-viewer-role']);
+        $denied->roles()->attach($role);
+        $role->permissions()->attach(Permission::firstOrCreate(['name' => 'export.view']));
 
         $this->actingAs($denied)->get('/exports')
             ->assertOk()
@@ -114,7 +124,9 @@ final class ExportGenerationAuthorizationTest extends TestCase
 
     public function test_existing_post_exports_remains_disabled(): void
     {
-        $this->post('/exports', ['export_type' => 'result_review'])
+        $user = $this->createAuthorizedUser('export-store@example.invalid');
+
+        $this->actingAs($user)->post('/exports', ['export_type' => 'result_review'])
             ->assertStatus(501)
             ->assertJson([
                 'message' => 'Export generation is not enabled yet.',
@@ -130,8 +142,10 @@ final class ExportGenerationAuthorizationTest extends TestCase
         $user = $this->createUser($email);
         $role = Role::create(['name' => 'export-trigger-role']);
         $permission = Permission::firstOrCreate(['name' => 'export.generate']);
+        $viewPermission = Permission::firstOrCreate(['name' => 'export.view']);
         $user->roles()->attach($role);
         $role->permissions()->attach($permission);
+        $role->permissions()->attach($viewPermission);
 
         return $user;
     }

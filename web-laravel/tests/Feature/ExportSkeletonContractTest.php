@@ -2,7 +2,11 @@
 
 namespace Tests\Feature;
 
+use App\Models\Permission;
+use App\Models\Role;
+use App\Models\User;
 use App\Services\Export\ExportService;
+use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -12,6 +16,25 @@ use Tests\TestCase;
 final class ExportSkeletonContractTest extends TestCase
 {
     use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->withoutMiddleware(PreventRequestForgery::class);
+
+        $user = User::create([
+            'name' => 'SYNTHETIC_EXPORT_SKELETON',
+            'email' => 'synthetic-export-skeleton@example.invalid',
+            'password' => 'technical-test-password',
+        ]);
+        $role = Role::create(['name' => 'synthetic-export-skeleton-role']);
+        $user->roles()->attach($role);
+        foreach (['export.view', 'export.generate'] as $name) {
+            $permission = Permission::firstOrCreate(['name' => $name]);
+            $role->permissions()->attach($permission);
+        }
+        $this->actingAs($user);
+    }
 
     public function test_exports_page_returns_success(): void
     {

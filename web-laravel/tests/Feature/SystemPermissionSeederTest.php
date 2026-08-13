@@ -26,7 +26,7 @@ final class SystemPermissionSeederTest extends TestCase
         $this->assertSame(1, Permission::where('name', 'export.download')->count());
         $this->assertSame('Download verified private exports', Permission::where('name', 'export.download')->value('display_name'));
         $this->assertSame('UNCHANGED_TECHNICAL_LABEL', $unrelated->fresh()->display_name);
-        $this->assertDatabaseCount('permissions', 3);
+        $this->assertDatabaseCount('permissions', 17);
         $this->assertDatabaseCount('users', 0);
         $this->assertDatabaseCount('roles', 0);
         $this->assertDatabaseCount('role_user', 0);

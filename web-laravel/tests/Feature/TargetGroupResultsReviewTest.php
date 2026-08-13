@@ -2,6 +2,10 @@
 
 namespace Tests\Feature;
 
+use App\Models\Permission;
+use App\Models\Role;
+use App\Models\User;
+use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
@@ -9,6 +13,23 @@ use Tests\TestCase;
 final class TargetGroupResultsReviewTest extends TestCase
 {
     use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->withoutMiddleware(PreventRequestForgery::class);
+
+        $user = User::create([
+            'name' => 'SYNTHETIC_RESULTS_REVIEW',
+            'email' => 'synthetic-results-review@example.invalid',
+            'password' => 'technical-test-password',
+        ]);
+        $role = Role::create(['name' => 'synthetic-results-review-role']);
+        $user->roles()->attach($role);
+        $permission = Permission::firstOrCreate(['name' => 'targetgroup.result.view']);
+        $role->permissions()->attach($permission);
+        $this->actingAs($user);
+    }
 
     public function test_results_page_returns_success(): void
     {
