@@ -28,6 +28,17 @@ final class TargetGroupFileVersion extends Model
         'correlation_id',
     ];
 
+    protected static function booted(): void
+    {
+        static::updating(function (self $version): void {
+            foreach (['lineage_id', 'version_token', 'version_number'] as $field) {
+                if ($version->isDirty($field)) {
+                    throw new \LogicException("Immutable version identity field cannot be changed: {$field}");
+                }
+            }
+        });
+    }
+
     public function lineage(): BelongsTo
     {
         return $this->belongsTo(TargetGroupLineage::class, 'lineage_id', 'lineage_id');
