@@ -14,6 +14,7 @@ final class TargetGroupImportRequestIdempotencyService
 {
     private const CONTEXT_VERSION = 'd8-context-v1';
     private const OPERATION = 'target_group_import';
+    private const D7_OPERATION = 'target_group_d7_activation';
 
     public function __construct(private readonly AuditLogger $auditLogger = new AuditLogger())
     {
@@ -26,8 +27,24 @@ final class TargetGroupImportRequestIdempotencyService
      */
     public function register(array $input): TargetGroupImportRequest
     {
-        $normalized = $this->normalize($input);
+        return $this->registerNormalized($this->normalize($input));
+    }
 
+    /**
+     * Register or replay one D7 activation request without creating job runtime.
+     *
+     * @param array{import_request_id?:mixed,operation?:mixed,scope_key?:mixed,content_sha256?:mixed,byte_size?:mixed,owner_user_id?:mixed,correlation_id?:mixed,lineage_id?:mixed,candidate_version_id?:mixed,expected_predecessor_version_id?:mixed} $input
+     */
+    public function registerD7Activation(array $input): TargetGroupImportRequest
+    {
+        return $this->registerNormalized($this->normalize($input, self::D7_OPERATION));
+    }
+
+    /**
+     * @param array{import_request_id:string,operation:string,context_version:string,owner_user_id:int,correlation_id:string,context_fingerprint:string} $normalized
+     */
+    private function registerNormalized(array $normalized): TargetGroupImportRequest
+    {
         try {
             return DB::transaction(function () use ($normalized): TargetGroupImportRequest {
                 $existing = TargetGroupImportRequest::query()
@@ -38,7 +55,7 @@ final class TargetGroupImportRequestIdempotencyService
                 if ($existing !== null) {
                     $this->assertOwner($existing, $normalized['owner_user_id']);
 
-                    if ($existing->operation !== self::OPERATION || $existing->context_fingerprint !== $normalized['context_fingerprint']) {
+                    if ($existing->operation !== $normalized['operation'] || $existing->context_fingerprint !== $normalized['context_fingerprint']) {
                         throw new LogicException('IDEMPOTENCY_KEY_CONTEXT_CONFLICT');
                     }
 
@@ -49,7 +66,7 @@ final class TargetGroupImportRequestIdempotencyService
 
                 DB::table('import_requests')->insert([
                     'import_request_id' => $normalized['import_request_id'],
-                    'operation' => self::OPERATION,
+                    'operation' => $normalized['operation'],
                     'lifecycle_state' => 'PENDING',
                     'context_fingerprint' => $normalized['context_fingerprint'],
                     'correlation_id' => $normalized['correlation_id'],
@@ -64,8 +81,8 @@ final class TargetGroupImportRequestIdempotencyService
                     'import_request_id' => $request->import_request_id,
                     'correlation_id' => $normalized['correlation_id'],
                     'after_payload' => [
-                        'operation' => self::OPERATION,
-                        'context_version' => self::CONTEXT_VERSION,
+                        'operation' => $normalized['operation'],
+                        'context_version' => $normalized['context_version'],
                         'context_fingerprint' => $normalized['context_fingerprint'],
                     ],
                 ]);
@@ -87,15 +104,15 @@ final class TargetGroupImportRequestIdempotencyService
     }
 
     /**
-     * @return array{import_request_id:string,owner_user_id:int,correlation_id:string,context_fingerprint:string}
+     * @return array{import_request_id:string,operation:string,context_version:string,owner_user_id:int,correlation_id:string,context_fingerprint:string}
      */
-    private function normalize(array $input): array
+    private function normalize(array $input, string $operation = self::OPERATION): array
     {
         if (! array_key_exists('import_request_id', $input) || ! is_string($input['import_request_id']) || preg_match('/\A[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\z/', $input['import_request_id']) !== 1) {
             throw new LogicException('IMPORT_REQUEST_ID_INVALID');
         }
 
-        if (! array_key_exists('operation', $input) || $input['operation'] !== self::OPERATION) {
+        if (! array_key_exists('operation', $input) || $input['operation'] !== $operation) {
             throw new LogicException('OPERATION_INVALID');
         }
 
@@ -121,19 +138,45 @@ final class TargetGroupImportRequestIdempotencyService
             throw new LogicException('REQUEST_OWNER_INVALID');
         }
 
+        if ($operation === self::D7_OPERATION) {
+            foreach (['lineage_id', 'candidate_version_id', 'expected_predecessor_version_id'] as $field) {
+                if (! array_key_exists($field, $input) || $input[$field] === null || $input[$field] === '') {
+                    throw new LogicException("D7_ACTIVATION_{$field}_REQUIRED");
+                }
+            }
+
+            if (! is_string($input['lineage_id']) || ! Str::isUuid($input['lineage_id'])) {
+                throw new LogicException('D7_ACTIVATION_LINEAGE_ID_INVALID');
+            }
+
+            foreach (['candidate_version_id', 'expected_predecessor_version_id'] as $field) {
+                if (! is_int($input[$field]) || $input[$field] < 1) {
+                    throw new LogicException("D7_ACTIVATION_{$field}_INVALID");
+                }
+            }
+        }
+
         $correlationId = $input['correlation_id'] ?? (string) Str::uuid();
         if (! is_string($correlationId) || Str::isUuid($correlationId) !== true) {
             throw new LogicException('REQUEST_CORRELATION_ID_INVALID');
         }
 
         $preimage = self::CONTEXT_VERSION."\n"
-            .'operation='.self::OPERATION."\n"
+            .'operation='.$operation."\n"
             .'scope_key='.$input['scope_key']."\n"
             .'content_sha256='.$input['content_sha256']."\n"
             .'byte_size='.$input['byte_size']."\n";
 
+        if ($operation === self::D7_OPERATION) {
+            $preimage .= 'lineage_id='.$input['lineage_id']."\n"
+                .'candidate_version_id='.$input['candidate_version_id']."\n"
+                .'expected_predecessor_version_id='.$input['expected_predecessor_version_id']."\n";
+        }
+
         return [
             'import_request_id' => $input['import_request_id'],
+            'operation' => $operation,
+            'context_version' => self::CONTEXT_VERSION,
             'owner_user_id' => $input['owner_user_id'],
             'correlation_id' => $correlationId,
             'context_fingerprint' => hash('sha256', $preimage),
@@ -173,7 +216,7 @@ final class TargetGroupImportRequestIdempotencyService
             throw $exception;
         }
 
-        if ($existing->operation !== self::OPERATION || $existing->context_fingerprint !== $normalized['context_fingerprint']) {
+        if ($existing->operation !== $normalized['operation'] || $existing->context_fingerprint !== $normalized['context_fingerprint']) {
             $this->auditConflict($normalized, 'IDEMPOTENCY_KEY_CONTEXT_CONFLICT');
             throw new LogicException('IDEMPOTENCY_KEY_CONTEXT_CONFLICT');
         }
