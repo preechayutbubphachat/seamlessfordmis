@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\Permission;
 use App\Models\Role;
 use App\Models\User;
+use Carbon\Carbon;
 use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -33,6 +34,141 @@ final class PreviewCommitContractTest extends TestCase
             $role->permissions()->attach($permission);
         }
         $this->actingAs($user);
+    }
+
+    protected function tearDown(): void
+    {
+        Carbon::setTestNow();
+        parent::tearDown();
+    }
+
+    public function test_source_preview_records_absolute_server_side_expiration_metadata(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-08-18 03:00:00+00:00'));
+
+        $token = $this->previewToken('/imports/source-files/preview', "cid,service_key\n1234567890121,SYN_ALPHA");
+        $entry = session('import_previews.'.$token);
+
+        $this->assertSame('2026-08-18T03:00:00+00:00', $entry['created_at']);
+        $this->assertSame('2026-08-18T03:30:00+00:00', $entry['expires_at']);
+    }
+
+    public function test_source_preview_is_rejected_at_exact_expiration_boundary(): void
+    {
+        $createdAt = Carbon::parse('2026-08-18 03:00:00+00:00');
+        Carbon::setTestNow($createdAt);
+        $token = $this->previewToken('/imports/source-files/preview', "cid,service_key\n1234567890121,SYN_ALPHA");
+
+        Carbon::setTestNow($createdAt->copy()->addMinutes(30));
+
+        $this->from('/imports/source-files/preview')->post('/imports/source-files/commit-preview', [
+            'preview_token' => $token,
+            'import_type' => 'source',
+            'confirmed' => '1',
+            'expires_at' => '2099-01-01T00:00:00+00:00',
+        ])->assertRedirect('/imports/source-files/preview')
+            ->assertSessionHasErrors(['preview_token' => 'PREVIEW_EXPIRED']);
+
+        $this->assertSame(0, DB::table('source_import_jobs')->count());
+        $this->assertSame(0, DB::table('source_import_files')->count());
+        $this->assertSame(0, DB::table('source_import_rows')->count());
+        $this->assertSame(0, DB::table('audit_logs')->count());
+    }
+
+    public function test_source_preview_is_rejected_after_expiration(): void
+    {
+        $createdAt = Carbon::parse('2026-08-18 03:00:00+00:00');
+        Carbon::setTestNow($createdAt);
+        $token = $this->previewToken('/imports/source-files/preview', "cid,service_key\n1234567890121,SYN_ALPHA");
+
+        Carbon::setTestNow($createdAt->copy()->addMinutes(31));
+
+        $this->from('/imports/source-files/preview')->post('/imports/source-files/commit-preview', [
+            'preview_token' => $token,
+            'import_type' => 'source',
+            'confirmed' => '1',
+        ])->assertRedirect('/imports/source-files/preview')
+            ->assertSessionHasErrors(['preview_token' => 'PREVIEW_EXPIRED']);
+
+        $this->assertSame(0, DB::table('source_import_jobs')->count());
+        $this->assertSame(0, DB::table('source_import_files')->count());
+        $this->assertSame(0, DB::table('source_import_rows')->count());
+        $this->assertSame(0, DB::table('audit_logs')->count());
+    }
+
+    public function test_legacy_preview_without_expiration_metadata_fails_closed(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-08-18 03:00:00+00:00'));
+        $token = $this->previewToken('/imports/source-files/preview', "cid,service_key\n1234567890121,SYN_ALPHA");
+        $entries = session('import_previews');
+        unset($entries[$token]['created_at'], $entries[$token]['expires_at']);
+
+        $this->withSession(['import_previews' => $entries])
+            ->from('/imports/source-files/preview')->post('/imports/source-files/commit-preview', [
+                'preview_token' => $token,
+                'import_type' => 'source',
+                'confirmed' => '1',
+            ])->assertRedirect('/imports/source-files/preview')
+                ->assertSessionHasErrors(['preview_token' => 'PREVIEW_EXPIRATION_INVALID']);
+
+        $this->assertSame(0, DB::table('source_import_jobs')->count());
+        $this->assertSame(0, DB::table('source_import_files')->count());
+        $this->assertSame(0, DB::table('source_import_rows')->count());
+        $this->assertSame(0, DB::table('audit_logs')->count());
+    }
+
+    public function test_malformed_preview_expiration_metadata_fails_closed(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-08-18 03:00:00+00:00'));
+        $token = $this->previewToken('/imports/source-files/preview', "cid,service_key\n1234567890121,SYN_ALPHA");
+        $entries = session('import_previews');
+        $entries[$token]['expires_at'] = 'not-a-timestamp';
+
+        $this->withSession(['import_previews' => $entries])
+            ->from('/imports/source-files/preview')->post('/imports/source-files/commit-preview', [
+                'preview_token' => $token,
+                'import_type' => 'source',
+                'confirmed' => '1',
+            ])->assertRedirect('/imports/source-files/preview')
+                ->assertSessionHasErrors(['preview_token' => 'PREVIEW_EXPIRATION_INVALID']);
+
+        $this->assertSame('not-a-timestamp', session('import_previews.'.$token.'.expires_at'));
+        $this->assertSame(0, DB::table('source_import_jobs')->count());
+        $this->assertSame(0, DB::table('source_import_files')->count());
+        $this->assertSame(0, DB::table('source_import_rows')->count());
+        $this->assertSame(0, DB::table('audit_logs')->count());
+    }
+
+    public function test_preview_refresh_does_not_renew_absolute_expiration(): void
+    {
+        $createdAt = Carbon::parse('2026-08-18 03:00:00+00:00');
+        Carbon::setTestNow($createdAt);
+        $token = $this->previewToken('/imports/source-files/preview', "cid,service_key\n1234567890121,SYN_ALPHA");
+        $expiresAt = session('import_previews.'.$token.'.expires_at');
+
+        $this->get('/imports/source-files/preview')->assertOk();
+        $this->assertSame($expiresAt, session('import_previews.'.$token.'.expires_at'));
+
+        Carbon::setTestNow($createdAt->copy()->addMinutes(30));
+
+        $this->from('/imports/source-files/preview')->post('/imports/source-files/commit-preview', [
+            'preview_token' => $token,
+            'import_type' => 'source',
+            'confirmed' => '1',
+        ])->assertRedirect('/imports/source-files/preview')
+            ->assertSessionHasErrors(['preview_token' => 'PREVIEW_EXPIRED']);
+
+        $this->from('/imports/source-files/preview')->post('/imports/source-files/commit-preview', [
+            'preview_token' => $token,
+            'import_type' => 'source',
+            'confirmed' => '1',
+        ])->assertRedirect('/imports/source-files/preview')
+            ->assertSessionHasErrors(['preview_token' => 'PREVIEW_EXPIRED']);
+
+        $this->assertSame(0, DB::table('source_import_jobs')->count());
+        $this->assertSame(0, DB::table('source_import_files')->count());
+        $this->assertSame(0, DB::table('source_import_rows')->count());
+        $this->assertSame(0, DB::table('audit_logs')->count());
     }
 
     public function test_preview_with_errors_cannot_commit(): void
@@ -84,7 +220,11 @@ final class PreviewCommitContractTest extends TestCase
     public function test_confirmed_source_preview_commits_staging_rows_and_audit_log(): void
     {
         Storage::fake('local');
+        $createdAt = Carbon::parse('2026-08-18 03:00:00+00:00');
+        Carbon::setTestNow($createdAt);
         $token = $this->previewToken('/imports/source-files/preview', "cid,service_key,marker\n1234567890121,SYN_ALPHA,RAW_A");
+
+        Carbon::setTestNow($createdAt->copy()->addMinutes(29));
 
         $this->post('/imports/source-files/commit-preview', [
             'preview_token' => $token,

@@ -9,6 +9,7 @@ use App\Services\Audit\AuditLogger;
 use App\Services\Import\ImportPreviewService;
 use App\Services\Import\SourceImportService;
 use App\Services\Import\StagingImportService;
+use Carbon\CarbonImmutable;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -19,6 +20,8 @@ use LogicException;
 final class SourceImportController extends Controller
 {
     use ImportSafetyResponse;
+
+    private const PREVIEW_TTL_MINUTES = 30;
 
     public function index(): View
     {
@@ -150,12 +153,16 @@ final class SourceImportController extends Controller
         $preview = $previewService->previewCsvFile($path, ['cid']);
         $sha256 = hash_file('sha256', $path);
         $previewToken = hash('sha256', 'source|'.$sha256.'|'.microtime(true));
+        $createdAt = now();
+        $expiresAt = $createdAt->copy()->addMinutes(self::PREVIEW_TTL_MINUTES);
 
         session()->put('import_previews.'.$previewToken, [
             'import_type' => 'source',
             'preview' => $preview,
             'sha256' => $sha256,
             'original_filename' => $file->getClientOriginalName(),
+            'created_at' => $createdAt->toIso8601String(),
+            'expires_at' => $expiresAt->toIso8601String(),
         ]);
 
         return view('imports.preview', [
@@ -179,6 +186,11 @@ final class SourceImportController extends Controller
 
         if (! is_array($entry) || ($entry['import_type'] ?? null) !== 'source') {
             return back()->withErrors(['preview_token' => 'Preview token is missing or expired.']);
+        }
+
+        $expirationFailure = $this->previewExpirationFailureReason($entry);
+        if ($expirationFailure !== null) {
+            return back()->withErrors(['preview_token' => $expirationFailure]);
         }
 
         if (($entry['preview']['errors'] ?? []) !== []) {
@@ -215,6 +227,36 @@ final class SourceImportController extends Controller
         return redirect()
             ->route('imports.source-files.show', ['job' => $result['source_import_job_id']])
             ->with('status', 'Preview committed to staging.');
+    }
+
+    private function previewExpirationFailureReason(array $entry): ?string
+    {
+        if (! is_string($entry['created_at'] ?? null) || ! is_string($entry['expires_at'] ?? null)) {
+            return 'PREVIEW_EXPIRATION_INVALID';
+        }
+
+        try {
+            $createdAt = CarbonImmutable::parse($entry['created_at']);
+            $expiresAt = CarbonImmutable::parse($entry['expires_at']);
+        } catch (\Throwable) {
+            return 'PREVIEW_EXPIRATION_INVALID';
+        }
+
+        if (! $expiresAt->equalTo($createdAt->addMinutes(self::PREVIEW_TTL_MINUTES))) {
+            return 'PREVIEW_EXPIRATION_INVALID';
+        }
+
+        $now = now();
+
+        if ($now->lessThan($createdAt)) {
+            return 'PREVIEW_EXPIRATION_INVALID';
+        }
+
+        if ($now->greaterThanOrEqualTo($expiresAt)) {
+            return 'PREVIEW_EXPIRED';
+        }
+
+        return null;
     }
 
     private function cleanupTempImports(): void
