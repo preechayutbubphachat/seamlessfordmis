@@ -22,6 +22,7 @@ final class TargetGroupCanonicalJobOwnershipService
     public function __construct(
         private readonly TargetGroupImportRequestIdempotencyService $requestRegistration = new TargetGroupImportRequestIdempotencyService(),
         private readonly AuditLogger $auditLogger = new AuditLogger(),
+        private readonly TargetGroupFileVersionActivationService $activation = new TargetGroupFileVersionActivationService(),
     ) {
     }
 
@@ -71,6 +72,142 @@ final class TargetGroupCanonicalJobOwnershipService
         } catch (Throwable) {
             return $this->unknown($request, null, 'RECONCILIATION_REQUIRED');
         }
+    }
+
+    /**
+     * Execute one D7 activation inside the canonical request/job ownership envelope.
+     *
+     * @return array{state:string,request:TargetGroupImportRequest,job:?TargetGroupJob,canonical_job_id:?int,reason:?string,result:?array<string,mixed>}
+     */
+    public function activateD7(array $input): array
+    {
+        $request = null;
+        $job = null;
+
+        try {
+            return DB::transaction(function () use (&$request, &$job, $input): array {
+                $request = $this->requestRegistration->registerD7ActivationWithinTransaction($input);
+                $lockedRequest = TargetGroupImportRequest::query()
+                    ->whereKey($request->getKey())
+                    ->lockForUpdate()
+                    ->first();
+
+                if ($lockedRequest === null) {
+                    return $this->unknown($request, null, 'REQUEST_NOT_FOUND');
+                }
+
+                $job = $this->resolveCanonicalJob($lockedRequest);
+                $this->assertBidirectionalOwnership($lockedRequest, $job);
+                $outcome = $this->classify($lockedRequest, $job, $input);
+
+                if ($outcome['state'] === 'OUTCOME_UNKNOWN') {
+                    return $this->result('OUTCOME_UNKNOWN', $lockedRequest, $job, 'RECONCILIATION_REQUIRED', null);
+                }
+                if ($outcome['state'] === 'FAILED_BEFORE_COMMIT') {
+                    return $this->result('FAILED_BEFORE_COMMIT', $lockedRequest, $job, $outcome['reason'], null);
+                }
+                if ($outcome['state'] === 'IN_PROGRESS') {
+                    return $this->result('IN_PROGRESS', $lockedRequest, $job, null, null);
+                }
+
+                $isReplay = $outcome['state'] === 'COMMITTED';
+                if (! $isReplay) {
+                    DB::table('import_requests')
+                        ->where('import_request_id', $lockedRequest->getKey())
+                        ->update(['lifecycle_state' => 'PROCESSING', 'failure_code' => null]);
+                    $lockedRequest->refresh();
+                    $job->forceFill(['status' => 'PROCESSING', 'error_message' => null])->save();
+                }
+
+                try {
+                    $d7Result = $this->activation->activateWithinTransaction($this->activationInput($input, $lockedRequest, $job));
+                } catch (LogicException $exception) {
+                    return $this->persistKnownFailure($lockedRequest, $job, $exception->getMessage());
+                }
+
+                DB::table('import_requests')
+                    ->where('import_request_id', $lockedRequest->getKey())
+                    ->update([
+                        'lifecycle_state' => 'COMPLETED',
+                        'completed_at' => now(),
+                        'failure_code' => null,
+                        'reconciliation_state' => null,
+                        'reconciliation_reference' => null,
+                    ]);
+                $lockedRequest->refresh();
+                $job->forceFill([
+                    'status' => 'COMPLETED',
+                    'finished_at' => now(),
+                    'error_message' => null,
+                ])->save();
+
+                return $this->result($isReplay ? 'COMMITTED' : 'COMPLETED', $lockedRequest, $job, null, $d7Result);
+            });
+        } catch (LogicException $exception) {
+            if (in_array($exception->getMessage(), [
+                'IDEMPOTENCY_KEY_OWNER_CONFLICT',
+                'IDEMPOTENCY_KEY_CONTEXT_CONFLICT',
+                'IMPORT_REQUEST_ID_INVALID',
+                'OPERATION_INVALID',
+            ], true)) {
+                throw $exception;
+            }
+            if ($exception->getMessage() === 'CANONICAL_JOB_BINDING_CONFLICT') {
+                return $this->unknown($request, $job, 'CANONICAL_JOB_BINDING_CONFLICT');
+            }
+
+            throw $exception;
+        } catch (Throwable) {
+            return $this->unknown($request, $job, 'RECONCILIATION_REQUIRED');
+        }
+    }
+
+    private function activationInput(array $input, TargetGroupImportRequest $request, TargetGroupJob $job): array
+    {
+        $actorUserId = $input['actor_user_id'] ?? $input['owner_user_id'] ?? null;
+        if (! is_int($actorUserId) || $actorUserId < 1) {
+            throw new LogicException('ACTOR_USER_ID_INVALID');
+        }
+
+        return [
+            'lineage_id' => $input['lineage_id'],
+            'candidate_version_id' => $input['candidate_version_id'],
+            'expected_predecessor_version_id' => $input['expected_predecessor_version_id'],
+            'actor_user_id' => $actorUserId,
+            'correlation_id' => $input['correlation_id'] ?? $request->correlation_id,
+            'import_request_id' => $request->getKey(),
+            'canonical_job_id' => (int) $job->getKey(),
+        ];
+    }
+
+    private function assertBidirectionalOwnership(TargetGroupImportRequest $request, TargetGroupJob $job): void
+    {
+        if (
+            $request->canonical_job_id === null
+            || (int) $request->canonical_job_id !== (int) $job->getKey()
+            || (string) $job->import_request_id !== (string) $request->getKey()
+        ) {
+            throw new LogicException('CANONICAL_JOB_BINDING_CONFLICT');
+        }
+    }
+
+    private function persistKnownFailure(TargetGroupImportRequest $request, TargetGroupJob $job, string $reason): array
+    {
+        DB::table('import_requests')
+            ->where('import_request_id', $request->getKey())
+            ->update([
+                'lifecycle_state' => 'FAILED',
+                'failure_code' => $reason,
+                'completed_at' => null,
+            ]);
+        $request->refresh();
+        $job->forceFill([
+            'status' => 'FAILED_FINAL',
+            'error_message' => $reason,
+            'finished_at' => now(),
+        ])->save();
+
+        return $this->result('FAILED_BEFORE_COMMIT', $request, $job, $reason, null);
     }
 
     private function resolveCanonicalJob(TargetGroupImportRequest $request): TargetGroupJob

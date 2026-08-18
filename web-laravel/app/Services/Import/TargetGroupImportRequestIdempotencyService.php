@@ -41,54 +41,16 @@ final class TargetGroupImportRequestIdempotencyService
     }
 
     /**
-     * @param array{import_request_id:string,operation:string,context_version:string,owner_user_id:int,correlation_id:string,context_fingerprint:string} $normalized
+     * Register or replay a D7 request inside an already-owned outer transaction.
+     *
+     * @param array{import_request_id?:mixed,operation?:mixed,scope_key?:mixed,content_sha256?:mixed,byte_size?:mixed,owner_user_id?:mixed,correlation_id?:mixed,lineage_id?:mixed,candidate_version_id?:mixed,expected_predecessor_version_id?:mixed} $input
      */
-    private function registerNormalized(array $normalized): TargetGroupImportRequest
+    public function registerD7ActivationWithinTransaction(array $input): TargetGroupImportRequest
     {
+        $normalized = $this->normalize($input, self::D7_OPERATION);
+
         try {
-            return DB::transaction(function () use ($normalized): TargetGroupImportRequest {
-                $existing = TargetGroupImportRequest::query()
-                    ->where('import_request_id', $normalized['import_request_id'])
-                    ->lockForUpdate()
-                    ->first();
-
-                if ($existing !== null) {
-                    $this->assertOwner($existing, $normalized['owner_user_id']);
-
-                    if ($existing->operation !== $normalized['operation'] || $existing->context_fingerprint !== $normalized['context_fingerprint']) {
-                        throw new LogicException('IDEMPOTENCY_KEY_CONTEXT_CONFLICT');
-                    }
-
-                    $this->auditReplay($existing, $normalized);
-
-                    return $existing->fresh();
-                }
-
-                DB::table('import_requests')->insert([
-                    'import_request_id' => $normalized['import_request_id'],
-                    'operation' => $normalized['operation'],
-                    'lifecycle_state' => 'PENDING',
-                    'context_fingerprint' => $normalized['context_fingerprint'],
-                    'correlation_id' => $normalized['correlation_id'],
-                    'created_by_user_id' => $normalized['owner_user_id'],
-                ]);
-
-                $request = TargetGroupImportRequest::query()
-                    ->where('import_request_id', $normalized['import_request_id'])
-                    ->firstOrFail();
-
-                $this->auditLogger->log('REQUEST_REGISTERED', 'import_request', null, [
-                    'import_request_id' => $request->import_request_id,
-                    'correlation_id' => $normalized['correlation_id'],
-                    'after_payload' => [
-                        'operation' => $normalized['operation'],
-                        'context_version' => $normalized['context_version'],
-                        'context_fingerprint' => $normalized['context_fingerprint'],
-                    ],
-                ]);
-
-                return $request->fresh();
-            });
+            return $this->registerNormalizedWithinTransaction($normalized);
         } catch (UniqueConstraintViolationException) {
             return $this->reconcileUniqueCollision($normalized);
         } catch (LogicException $exception) {
@@ -101,6 +63,75 @@ final class TargetGroupImportRequestIdempotencyService
 
             throw $exception;
         }
+    }
+
+    /**
+     * @param array{import_request_id:string,operation:string,context_version:string,owner_user_id:int,correlation_id:string,context_fingerprint:string} $normalized
+     */
+    private function registerNormalized(array $normalized): TargetGroupImportRequest
+    {
+        try {
+            return DB::transaction(fn (): TargetGroupImportRequest => $this->registerNormalizedWithinTransaction($normalized));
+        } catch (UniqueConstraintViolationException) {
+            return $this->reconcileUniqueCollision($normalized);
+        } catch (LogicException $exception) {
+            if (in_array($exception->getMessage(), [
+                'IDEMPOTENCY_KEY_OWNER_CONFLICT',
+                'IDEMPOTENCY_KEY_CONTEXT_CONFLICT',
+            ], true)) {
+                $this->auditConflict($normalized, $exception->getMessage());
+            }
+
+            throw $exception;
+        }
+    }
+
+    /**
+     * @param array{import_request_id:string,operation:string,context_version:string,owner_user_id:int,correlation_id:string,context_fingerprint:string} $normalized
+     */
+    private function registerNormalizedWithinTransaction(array $normalized): TargetGroupImportRequest
+    {
+        $existing = TargetGroupImportRequest::query()
+            ->where('import_request_id', $normalized['import_request_id'])
+            ->lockForUpdate()
+            ->first();
+
+        if ($existing !== null) {
+            $this->assertOwner($existing, $normalized['owner_user_id']);
+
+            if ($existing->operation !== $normalized['operation'] || $existing->context_fingerprint !== $normalized['context_fingerprint']) {
+                throw new LogicException('IDEMPOTENCY_KEY_CONTEXT_CONFLICT');
+            }
+
+            $this->auditReplay($existing, $normalized);
+
+            return $existing->fresh();
+        }
+
+        DB::table('import_requests')->insert([
+            'import_request_id' => $normalized['import_request_id'],
+            'operation' => $normalized['operation'],
+            'lifecycle_state' => 'PENDING',
+            'context_fingerprint' => $normalized['context_fingerprint'],
+            'correlation_id' => $normalized['correlation_id'],
+            'created_by_user_id' => $normalized['owner_user_id'],
+        ]);
+
+        $request = TargetGroupImportRequest::query()
+            ->where('import_request_id', $normalized['import_request_id'])
+            ->firstOrFail();
+
+        $this->auditLogger->log('REQUEST_REGISTERED', 'import_request', null, [
+            'import_request_id' => $request->import_request_id,
+            'correlation_id' => $normalized['correlation_id'],
+            'after_payload' => [
+                'operation' => $normalized['operation'],
+                'context_version' => $normalized['context_version'],
+                'context_fingerprint' => $normalized['context_fingerprint'],
+            ],
+        ]);
+
+        return $request->fresh();
     }
 
     /**
