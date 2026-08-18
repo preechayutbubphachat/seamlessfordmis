@@ -73,6 +73,10 @@ Route::post('/imports/source-files/commit-preview', [SourceImportController::cla
 Route::post('/imports/source-files', [SourceImportController::class, 'store'])
     ->middleware(['auth', 'permission:import.source.commit'])
     ->name('imports.source-files.store');
+Route::get('/imports/source-files/{job}/errors', [SourceImportController::class, 'exportErrors'])
+    ->whereNumber('job')
+    ->middleware(['auth', 'permission:import.source.view'])
+    ->name('imports.source-files.errors');
 Route::get('/imports/source-files/{job}', [SourceImportController::class, 'show'])
     ->whereNumber('job')
     ->middleware(['auth', 'permission:import.source.view'])

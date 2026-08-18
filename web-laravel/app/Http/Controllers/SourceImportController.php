@@ -3,19 +3,23 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\CommitPreviewImportRequest;
-use App\Http\Requests\StoreSourceImportRequest;
 use App\Http\Requests\PreviewCsvImportRequest;
+use App\Http\Requests\StoreSourceImportRequest;
 use App\Services\Audit\AuditLogger;
 use App\Services\Import\ImportPreviewService;
+use App\Services\Import\SourceImportErrorExportService;
 use App\Services\Import\SourceImportService;
 use App\Services\Import\StagingImportService;
 use Carbon\CarbonImmutable;
 use Illuminate\Contracts\View\View;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use LogicException;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 final class SourceImportController extends Controller
 {
@@ -45,6 +49,14 @@ final class SourceImportController extends Controller
             'emptyMessage' => 'No staging imports yet',
             'safetyNote' => 'No real patient data. No upload form is available. Source import review is read-only.',
         ]);
+    }
+
+    public function exportErrors(
+        string $job,
+        Request $request,
+        SourceImportErrorExportService $exportService,
+    ): StreamedResponse {
+        return $exportService->download((int) $job, (int) $request->user()->id);
     }
 
     public function show(string $job): View
@@ -115,7 +127,7 @@ final class SourceImportController extends Controller
             ], 422);
         } catch (\Throwable $e) {
             // TEMPORARY: Log the actual exception for debugging
-            \Illuminate\Support\Facades\Log::error('SourceImportController::store exception', [
+            Log::error('SourceImportController::store exception', [
                 'class' => get_class($e),
                 'message' => $e->getMessage(),
                 'file' => $e->getFile(),
@@ -126,7 +138,7 @@ final class SourceImportController extends Controller
             $this->cleanupTempImports();
 
             return response()->json([
-                'message' => 'Import failed: ' . $e->getMessage(),
+                'message' => 'Import failed: '.$e->getMessage(),
                 'file_stored' => false,
                 'patient_data_imported' => false,
             ], 500);
