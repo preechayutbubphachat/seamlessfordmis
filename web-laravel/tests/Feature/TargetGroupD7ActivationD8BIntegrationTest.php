@@ -92,6 +92,39 @@ final class TargetGroupD7ActivationD8BIntegrationTest extends TestCase
         $this->assertSame(0, AuditLog::query()->where('action', 'VERSION_SUPERSEDED')->count());
     }
 
+    public function test_missing_confirmation_produces_exact_d7_failure_before_commit(): void
+    {
+        $fixture = $this->ownedFixture();
+        DB::table('target_group_file_versions')->where('id', $fixture['candidate'])->update(['confirmed_at' => null]);
+
+        $result = $this->service()->activateD7($fixture['input']);
+
+        $this->assertSame('FAILED_BEFORE_COMMIT', $result['state']);
+        $this->assertSame('MISSING_SUCCESSOR_CONFIRMATION', $result['reason']);
+        $this->assertSame('FAILED', $result['request']->lifecycle_state);
+        $this->assertSame('MISSING_SUCCESSOR_CONFIRMATION', $result['request']->failure_code);
+        $this->assertSame('FAILED_FINAL', $result['job']->status);
+        $this->assertSame('MISSING_SUCCESSOR_CONFIRMATION', $result['job']->error_message);
+        $this->assertD7Unchanged($fixture);
+    }
+
+    public function test_unacceptable_successor_review_produces_exact_d7_failure_before_commit(): void
+    {
+        $fixture = $this->ownedFixture();
+        $candidateFile = $this->value('target_group_file_versions', $fixture['candidate'], 'target_group_file_id');
+        DB::table('target_group_rows')->insert(['target_group_job_id' => $fixture['jobId'], 'target_group_file_id' => $candidateFile, 'sheet_name' => 'Sheet1', 'row_number' => 1, 'raw_payload' => json_encode(['synthetic' => true]), 'cid_status' => 'NOT_EVALUATED', 'validation_status' => 'PENDING', 'review_status' => 'NEEDS_REVIEW']);
+
+        $result = $this->service()->activateD7($fixture['input']);
+
+        $this->assertSame('FAILED_BEFORE_COMMIT', $result['state']);
+        $this->assertSame('SUCCESSOR_REVIEW_NOT_ACCEPTABLE', $result['reason']);
+        $this->assertSame('FAILED', $result['request']->lifecycle_state);
+        $this->assertSame('SUCCESSOR_REVIEW_NOT_ACCEPTABLE', $result['request']->failure_code);
+        $this->assertSame('FAILED_FINAL', $result['job']->status);
+        $this->assertSame('SUCCESSOR_REVIEW_NOT_ACCEPTABLE', $result['job']->error_message);
+        $this->assertD7Unchanged($fixture);
+    }
+
     public function test_candidate_job_mismatch_fails_closed_without_pointer_or_supersession_mutation(): void
     {
         $fixture = $this->ownedFixture(candidateJobId: null, mismatchCandidateJob: true);
@@ -181,6 +214,7 @@ final class TargetGroupD7ActivationD8BIntegrationTest extends TestCase
         $predecessor = $this->createVersion($lineage, $jobId, $preFile, 'ACTIVE', 1, null);
         $candidateJob = $mismatchCandidateJob ? $otherJobId : ($candidateJobId ?? $jobId);
         $candidate = $this->createVersion($lineage, $candidateJob, $candidateFile, 'CANDIDATE', 2, $predecessor);
+        DB::table('target_group_file_versions')->where('id', $candidate)->update(['confirmed_by_user_id' => 17, 'confirmed_at' => now()]);
         DB::table('target_group_lineages')->where('lineage_id', $lineage)->update(['active_version_id' => $predecessor]);
 
         return [
@@ -247,6 +281,15 @@ final class TargetGroupD7ActivationD8BIntegrationTest extends TestCase
             AuditLog::query()->where('action', 'VERSION_SUPERSEDED')->count(),
             DB::table('target_group_lineages')->where('lineage_id', $lineage)->value('active_version_id'),
         ];
+    }
+
+    private function assertD7Unchanged(array $fixture): void
+    {
+        $this->assertSame('ACTIVE', $this->value('target_group_file_versions', $fixture['predecessor'], 'version_status'));
+        $this->assertSame('CANDIDATE', $this->value('target_group_file_versions', $fixture['candidate'], 'version_status'));
+        $this->assertSame($fixture['predecessor'], $this->value('target_group_lineages', $fixture['lineage'], 'active_version_id', 'lineage_id'));
+        $this->assertSame(0, DB::table('target_group_version_supersessions')->count());
+        $this->assertSame(0, AuditLog::query()->where('action', 'VERSION_SUPERSEDED')->count());
     }
 
     private function value(string $table, int|string $key, string $column, string $keyColumn = 'id'): mixed

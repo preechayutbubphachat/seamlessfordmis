@@ -5,6 +5,7 @@ namespace App\Services\Import;
 use App\Models\AuditLog;
 use App\Models\TargetGroupFileVersion;
 use App\Models\TargetGroupLineage;
+use App\Models\TargetGroupRow;
 use App\Models\TargetGroupVersionSupersession;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -141,6 +142,32 @@ final class TargetGroupFileVersionActivationService
         $reason = trim((string) $candidate->correction_reason);
         if ($reason === '' || mb_strlen($reason, 'UTF-8') > 64) {
             throw new LogicException('CORRECTION_REASON_REQUIRED');
+        }
+
+        if (
+            $candidate->confirmed_by_user_id === null
+            || $candidate->confirmed_at === null
+            || ! DB::table('users')->where('id', $candidate->confirmed_by_user_id)->exists()
+        ) {
+            throw new LogicException('MISSING_SUCCESSOR_CONFIRMATION');
+        }
+
+        $candidateRows = TargetGroupRow::query()
+            ->where('target_group_file_id', $candidate->target_group_file_id)
+            ->where('target_group_job_id', $candidate->target_group_job_id)
+            ->lockForUpdate()
+            ->get(['id', 'review_status', 'review_outcome', 'reviewed_by', 'reviewed_at']);
+        foreach ($candidateRows as $candidateRow) {
+            $reviewAccepted = $candidateRow->review_status === 'VALID'
+                || (
+                    $candidateRow->review_status === 'APPROVED'
+                    && $candidateRow->review_outcome === 'APPROVED'
+                    && $candidateRow->reviewed_by !== null
+                    && $candidateRow->reviewed_at !== null
+                );
+            if (! $reviewAccepted) {
+                throw new LogicException('SUCCESSOR_REVIEW_NOT_ACCEPTABLE');
+            }
         }
 
         $now = now();
