@@ -20,6 +20,12 @@ final class TargetGroupHistoryRow extends Model
         'normalized_visit_date',
         'evidence_source',
         'provenance',
+        'normalized_cid',
+        'matching_key_version',
+        'normalization_version',
+        'validation_version',
+        'scope_context_id',
+        'target_group_file_version_id',
     ];
 
     public function job(): BelongsTo
@@ -37,12 +43,18 @@ final class TargetGroupHistoryRow extends Model
         return $this->belongsTo(TargetGroupFile::class, 'target_group_file_id');
     }
 
+    public function version(): BelongsTo
+    {
+        return $this->belongsTo(TargetGroupFileVersion::class, 'target_group_file_version_id');
+    }
+
     protected function casts(): array
     {
         return [
             'raw_payload' => 'array',
             'provenance' => 'array',
             'normalized_visit_date' => 'date',
+            'target_group_file_version_id' => 'integer',
         ];
     }
 }

@@ -24,6 +24,10 @@ final class SourceImportRow extends Model
         'normalized_visit_date',
         'validation_status',
         'review_reason',
+        'matching_key_version',
+        'normalization_version',
+        'validation_version',
+        'scope_context_id',
     ];
 
     public function job(): BelongsTo

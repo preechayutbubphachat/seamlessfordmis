@@ -3,6 +3,7 @@
 namespace App\Services\Result;
 
 use App\Services\CidValidator;
+use App\Services\History\HistoryReconciliationService;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 use LogicException;
@@ -15,7 +16,10 @@ final class ResultGenerationService
     public const CATEGORY_MISSING_IDENTIFIER = 'missing_identifier';
     public const CATEGORY_NEEDS_REVIEW = 'needs_review';
 
-    public function __construct(private readonly CidValidator $cidValidator = new CidValidator())
+    public function __construct(
+        private readonly CidValidator $cidValidator = new CidValidator(),
+        private readonly HistoryReconciliationService $historyReconciliationService = new HistoryReconciliationService(),
+    )
     {
     }
 
@@ -49,17 +53,34 @@ final class ResultGenerationService
             $targetRow = $this->targetRowToDraftInput($primaryRow);
             $targetRow['identity_ambiguous'] = $this->hasAmbiguousIdentity($rows);
 
-            $historyRows = array_merge(
-                $this->sourceHistoryForTargetRow($primaryRow),
-                $this->targetGroupFileHistoryForRows($targetGroupJobId, $rows)
-            );
+            $activeVersionContext = $this->activeVersionContext($primaryRow);
+            if ($activeVersionContext !== null) {
+                $historyRows = array_merge(
+                    $this->strictSourceHistoryForTargetRow($primaryRow, $activeVersionContext),
+                    $this->strictTargetGroupFileHistoryForRows($targetGroupJobId, $rows, $activeVersionContext),
+                );
+                $draft = $this->historyReconciliationService->reconcile(
+                    $this->targetRowToHistorySubject($primaryRow, $activeVersionContext),
+                    $historyRows,
+                    $selectedServiceKeys,
+                );
+            } else {
+                $historyRows = array_merge(
+                    $this->sourceHistoryForTargetRow($primaryRow),
+                    $this->targetGroupFileHistoryForRows($targetGroupJobId, $rows),
+                );
+                $draft = $this->buildPersonResultDraft($targetRow, $historyRows, $selectedServiceKeys);
+            }
 
-            $draft = $this->buildPersonResultDraft($targetRow, $historyRows, $selectedServiceKeys);
-            $draft['person_key'] = $personKey;
-            $draft['display_name'] = $primaryRow->normalized_full_name ?? $primaryRow->raw_full_name ?? null;
+            if ($activeVersionContext === null) {
+                $draft['person_key'] = $personKey;
+            } else {
+                $draft['person_key'] = $draft['person_key'] ?? $personKey;
+            }
+            $draft['display_name'] = $primaryRow->normalized_full_name ?? $primaryRow->raw_full_name;
             $draft['review_status'] = $draft['result_category'] === self::CATEGORY_NEEDS_REVIEW ? 'needs_review' : 'not_required';
             $draft['review_reason'] = $draft['result_category'] === self::CATEGORY_NEEDS_REVIEW
-                ? 'Multiple staged rows share one normalized CID and require review.'
+                ? ($draft['review_reason'] ?? 'AMBIGUOUS_HISTORY')
                 : null;
             $draft['target_group_row_ids'] = array_map(fn (object $row): int => (int) $row->id, $rows);
 
@@ -268,6 +289,114 @@ final class ResultGenerationService
         }
 
         return count($names) > 1;
+    }
+
+    private function activeVersionContext(object $targetRow): ?array
+    {
+        $version = DB::table('target_group_file_versions as versions')
+            ->join('target_group_lineages as lineages', 'lineages.active_version_id', '=', 'versions.id')
+            ->where('versions.target_group_job_id', $targetRow->target_group_job_id)
+            ->where('versions.target_group_file_id', $targetRow->target_group_file_id)
+            ->where('versions.version_status', 'ACTIVE')
+            ->first([
+                'versions.id as active_version_id',
+                'versions.lineage_id',
+            ]);
+
+        if ($version === null) {
+            return null;
+        }
+
+        return [
+            'active_version_id' => (int) $version->active_version_id,
+            'lineage_id' => (string) $version->lineage_id,
+            'scope_context_id' => 'SCOPE-0:lineage:'.$version->lineage_id,
+        ];
+    }
+
+    private function targetRowToHistorySubject(object $targetRow, array $versionContext): array
+    {
+        return [
+            'raw_cid' => $targetRow->raw_cid,
+            'normalized_cid' => $targetRow->normalized_cid,
+            'cid_status' => $targetRow->cid_status,
+            'matching_key_version' => $targetRow->matching_key_version,
+            'normalization_version' => $targetRow->normalization_version,
+            'validation_version' => $targetRow->validation_version,
+            'scope_context_id' => $versionContext['scope_context_id'],
+            'lineage_id' => $versionContext['lineage_id'],
+            'active_version_id' => $versionContext['active_version_id'],
+            'subject_version_id' => $versionContext['active_version_id'],
+            'full_name' => $targetRow->normalized_full_name ?? $targetRow->raw_full_name,
+            'birth_date' => $targetRow->normalized_birth_date,
+        ];
+    }
+
+    private function strictSourceHistoryForTargetRow(object $targetRow, array $versionContext): array
+    {
+        if ($targetRow->normalized_cid === null) {
+            return [];
+        }
+
+        return DB::table('source_import_rows')
+            ->where('scope_context_id', $versionContext['scope_context_id'])
+            ->where('normalized_cid', $targetRow->normalized_cid)
+            ->orderBy('row_number')
+            ->get()
+            ->map(fn (object $row): array => [
+                'source_type' => 'screening_db',
+                'source_file_id' => $row->source_file_id !== null ? (int) $row->source_file_id : null,
+                'sheet_name' => $row->sheet_name,
+                'row_number' => $row->row_number,
+                'source_payload' => json_decode((string) $row->raw_payload, true) ?: [],
+                'evidence_date' => $row->normalized_visit_date,
+                'normalized_service_key' => $row->normalized_service_key,
+                'normalized_cid' => $row->normalized_cid,
+                'matching_key_version' => $row->matching_key_version,
+                'normalization_version' => $row->normalization_version,
+                'validation_version' => $row->validation_version,
+                'scope_context_id' => $row->scope_context_id,
+                'full_name' => $row->normalized_full_name ?? $row->raw_full_name,
+                'birth_date' => null,
+                'provenance' => [
+                    'table' => 'source_import_rows',
+                    'row_id' => (int) $row->id,
+                    'source_import_job_id' => (int) $row->source_import_job_id,
+                    'source_file_id' => $row->source_file_id !== null ? (int) $row->source_file_id : null,
+                ],
+            ])
+            ->all();
+    }
+
+    private function strictTargetGroupFileHistoryForRows(int $targetGroupJobId, array $targetRows, array $versionContext): array
+    {
+        $targetRowIds = array_map(fn (object $row): int => (int) $row->id, $targetRows);
+
+        return DB::table('target_group_history_rows')
+            ->where('target_group_job_id', $targetGroupJobId)
+            ->whereIn('target_group_row_id', $targetRowIds)
+            ->orderBy('row_number')
+            ->get()
+            ->map(fn (object $row): array => [
+                'source_type' => 'target_group_file',
+                'source_file_id' => $row->target_group_file_id !== null ? (int) $row->target_group_file_id : null,
+                'sheet_name' => $row->sheet_name,
+                'row_number' => $row->row_number,
+                'source_payload' => json_decode((string) $row->raw_payload, true) ?: [],
+                'evidence_date' => $row->normalized_visit_date,
+                'normalized_service_key' => $row->normalized_service_key,
+                'normalized_cid' => $row->normalized_cid,
+                'matching_key_version' => $row->matching_key_version,
+                'normalization_version' => $row->normalization_version,
+                'validation_version' => $row->validation_version,
+                'scope_context_id' => $row->scope_context_id,
+                'lineage_id' => $versionContext['lineage_id'],
+                'producing_version_id' => $row->target_group_file_version_id,
+                'full_name' => null,
+                'birth_date' => null,
+                'provenance' => json_decode((string) $row->provenance, true) ?: [],
+            ])
+            ->all();
     }
 
     private function sourceHistoryForTargetRow(object $targetRow): array
