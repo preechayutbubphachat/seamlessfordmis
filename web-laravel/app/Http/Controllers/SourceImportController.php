@@ -158,11 +158,20 @@ final class SourceImportController extends Controller
         ]);
     }
 
-    public function preview(PreviewCsvImportRequest $request, ImportPreviewService $previewService): View
-    {
+    public function preview(
+        PreviewCsvImportRequest $request,
+        ImportPreviewService $previewService,
+    ): View|RedirectResponse {
         $file = $request->file('file');
         $path = (string) $file->getRealPath();
-        $preview = $previewService->previewCsvFile($path, ['cid']);
+        if ($path === '' || ! is_file($path) || ! is_readable($path)) {
+            return back()->withErrors(['file' => 'Uploaded file path is unavailable.']);
+        }
+        $preview = $previewService->previewSourceFile(
+            $path,
+            ['cid'],
+            $file->getClientOriginalExtension(),
+        );
         $sha256 = hash_file('sha256', $path);
         $previewToken = hash('sha256', 'source|'.$sha256.'|'.microtime(true));
         $createdAt = now();
@@ -178,7 +187,9 @@ final class SourceImportController extends Controller
         ]);
 
         return view('imports.preview', [
-            'title' => 'Source File CSV Preview',
+            'title' => strtolower($file->getClientOriginalExtension()) === 'xlsx'
+                ? 'Source File XLSX Preview'
+                : 'Source File CSV Preview',
             'postRoute' => 'imports.source-files.preview.store',
             'commitRoute' => 'imports.source-files.preview.commit',
             'importType' => 'source',

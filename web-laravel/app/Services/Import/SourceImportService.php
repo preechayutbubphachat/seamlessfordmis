@@ -2,30 +2,27 @@
 
 namespace App\Services\Import;
 
-use App\Models\SourceImportFile;
-use App\Models\SourceImportJob;
-use App\Models\SourceImportRow;
 use App\Services\Audit\AuditLogger;
 use App\Services\FileHashService;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
-use Illuminate\Http\UploadedFile;
 use InvalidArgumentException;
 use LogicException;
-use RuntimeException;
 
 final class SourceImportService
 {
     public function __construct(
-        private readonly StreamingCsvParser $csvParser = new StreamingCsvParser(),
-        private readonly FileHashService $fileHashService = new FileHashService(),
-        private readonly AuditLogger $auditLogger = new AuditLogger(),
+        private readonly StreamingCsvParser $csvParser = new StreamingCsvParser,
+        private readonly XlsxSourceParser $xlsxParser = new XlsxSourceParser,
+        private readonly FileHashService $fileHashService = new FileHashService,
+        private readonly AuditLogger $auditLogger = new AuditLogger,
     ) {}
 
     /**
      * Stage a full source import from uploaded files.
      *
-     * @param list<UploadedFile> $files
+     * @param  list<UploadedFile>  $files
      * @return array{
      *     source_import_job_id: int,
      *     source_file_ids: list<int>,
@@ -53,7 +50,7 @@ final class SourceImportService
 
         if ($existingShas !== []) {
             throw new LogicException(
-                'Duplicate file(s) detected: ' . implode(', ', $existingShas) .
+                'Duplicate file(s) detected: '.implode(', ', $existingShas).
                 '. These files have already been imported.'
             );
         }
@@ -70,7 +67,7 @@ final class SourceImportService
 
             // Create the import job
             $jobId = DB::table('source_import_jobs')->insertGetId([
-                'job_name' => 'Full source import - ' . $now->format('Y-m-d H:i:s'),
+                'job_name' => 'Full source import - '.$now->format('Y-m-d H:i:s'),
                 'status' => 'processing',
                 'total_files' => count($validatedFiles),
                 'total_rows' => 0,
@@ -174,7 +171,7 @@ final class SourceImportService
     }
 
     /**
-     * @param list<UploadedFile> $files
+     * @param  list<UploadedFile>  $files
      * @return list<array{
      *     original_filename: string,
      *     stored_path: string,
@@ -197,22 +194,25 @@ final class SourceImportService
         $validated = [];
 
         foreach ($files as $file) {
-            if (!$file->isValid()) {
-                throw new InvalidArgumentException('Uploaded file is not valid: ' . $file->getErrorMessage());
+            if (! $file->isValid()) {
+                throw new InvalidArgumentException('Uploaded file is not valid: '.$file->getErrorMessage());
             }
 
             $originalFilename = $file->getClientOriginalName();
             $mimeType = $file->getMimeType();
             $size = $file->getSize();
 
-            // Enforce file type
-            if (!in_array($mimeType, ['text/csv', 'text/plain', 'application/csv'], true)) {
-                throw new InvalidArgumentException('File type not allowed: ' . $mimeType . '. Only CSV files are accepted.');
+            // Enforce bounded source file types.
+            $extension = strtolower(pathinfo($originalFilename, PATHINFO_EXTENSION));
+            $isCsv = in_array($mimeType, ['text/csv', 'text/plain', 'application/csv'], true) && $extension === 'csv';
+            $isXlsx = $mimeType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' && $extension === 'xlsx';
+            if (! $isCsv && ! $isXlsx) {
+                throw new InvalidArgumentException('File type not allowed: '.$mimeType.'. Only CSV or bounded XLSX source files are accepted.');
             }
 
             // Enforce max size (10MB default)
             if ($size > 10 * 1024 * 1024) {
-                throw new InvalidArgumentException('File size exceeds maximum allowed (10MB): ' . $originalFilename);
+                throw new InvalidArgumentException('File size exceeds maximum allowed (10MB): '.$originalFilename);
             }
 
             // Store temporarily
@@ -221,13 +221,15 @@ final class SourceImportService
             // Calculate SHA256
             $sha256 = $this->fileHashService->sha256(Storage::disk('local')->path($storedPath));
 
-            // Parse for preview/validation
-            $preview = $this->csvParser->parseFile(Storage::disk('local')->path($storedPath), ['cid']);
+            // Parse for preview/validation through the shared source contract.
+            $storedAbsolutePath = Storage::disk('local')->path($storedPath);
+            $preview = $isXlsx
+                ? $this->xlsxParser->parseFile($storedAbsolutePath, ['cid'])
+                : $this->csvParser->parseFile($storedAbsolutePath, ['cid']);
 
             if ($preview['errors'] !== []) {
-                // Clean up temp file on validation error
                 Storage::disk('local')->delete($storedPath);
-                throw new LogicException('CSV validation failed: ' . json_encode($preview['errors']));
+                throw new LogicException('Source file validation failed: '.json_encode($preview['errors']));
             }
 
             $validated[] = [
@@ -246,12 +248,12 @@ final class SourceImportService
     private function assertPersistableRow(array $row): void
     {
         foreach (['row_number', 'raw_payload', 'identifier_status', 'validation_status'] as $key) {
-            if (!array_key_exists($key, $row)) {
+            if (! array_key_exists($key, $row)) {
                 throw new LogicException("Malformed preview row is missing {$key}.");
             }
         }
 
-        if (!is_array($row['raw_payload'])) {
+        if (! is_array($row['raw_payload'])) {
             throw new LogicException('Malformed preview row raw_payload must be an array.');
         }
     }

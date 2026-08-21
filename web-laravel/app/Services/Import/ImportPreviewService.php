@@ -5,12 +5,12 @@ namespace App\Services\Import;
 final class ImportPreviewService
 {
     public function __construct(
-        private readonly CsvPreviewParser $csvPreviewParser = new CsvPreviewParser(),
-    ) {
-    }
+        private readonly CsvPreviewParser $csvPreviewParser = new CsvPreviewParser,
+        private readonly XlsxSourceParser $xlsxSourceParser = new XlsxSourceParser,
+    ) {}
 
     /**
-     * @param list<string> $requiredColumns
+     * @param  list<string>  $requiredColumns
      * @return array{
      *     total_rows: int,
      *     valid_rows: int,
@@ -28,7 +28,7 @@ final class ImportPreviewService
     }
 
     /**
-     * @param list<string> $requiredColumns
+     * @param  list<string>  $requiredColumns
      * @return array{
      *     total_rows: int,
      *     valid_rows: int,
@@ -43,5 +43,21 @@ final class ImportPreviewService
     public function previewCsvFile(string $path, array $requiredColumns = ['cid'], string $importType = 'source'): array
     {
         return $this->csvPreviewParser->parseFile($path, $requiredColumns, $importType);
+    }
+
+    /**
+     * @param  list<string>  $requiredColumns
+     * @return array<string, mixed>
+     */
+    public function previewSourceFile(
+        string $path,
+        array $requiredColumns = ['cid'],
+        ?string $extension = null,
+    ): array {
+        $extension ??= pathinfo($path, PATHINFO_EXTENSION);
+
+        return strtolower($extension) === 'xlsx'
+            ? $this->xlsxSourceParser->parseFile($path, $requiredColumns)
+            : $this->csvPreviewParser->parseFile($path, $requiredColumns, 'source');
     }
 }
