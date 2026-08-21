@@ -34,6 +34,43 @@ final class XlsxSourceImportTest extends TestCase
         }
     }
 
+    public function test_unexpected_xlsx_reader_failure_uses_bounded_error_contract(): void
+    {
+        $path = $this->workbook(function (Spreadsheet $book): void {
+            $book->getActiveSheet()->fromArray([
+                ['cid', 'service_key'],
+                ['1234567890121', 'SYN_ALPHA'],
+            ]);
+        });
+
+        try {
+            $preview = (new XlsxSourceParser(
+                readerFactory: static fn (): object => new class
+                {
+                    public function setReadDataOnly(bool $value): void {}
+
+                    public function setReadEmptyCells(bool $value): void {}
+
+                    public function setIncludeCharts(bool $value): void {}
+
+                    public function setAllowExternalImages(bool $value): void {}
+
+                    public function load(string $path): object
+                    {
+                        throw new \RuntimeException('SENSITIVE_INTERNAL_CANARY C:\\internal\\secret\\patient-data.txt');
+                    }
+                },
+            ))->parseFile($path, ['cid', 'service_key']);
+
+            $this->assertSame('XLSX_PARSE_FAILED', $preview['errors'][0]['code']);
+            $this->assertSame('Unable to read XLSX file.', $preview['errors'][0]['message']);
+            $this->assertStringNotContainsString('SENSITIVE_INTERNAL_CANARY', json_encode($preview, JSON_THROW_ON_ERROR));
+            $this->assertStringNotContainsString('C:\\internal\\secret\\patient-data.txt', json_encode($preview, JSON_THROW_ON_ERROR));
+        } finally {
+            @unlink($path);
+        }
+    }
+
     public function test_import_preview_service_dispatches_xlsx_without_changing_csv_semantics(): void
     {
         $path = $this->workbook(function (Spreadsheet $book): void {

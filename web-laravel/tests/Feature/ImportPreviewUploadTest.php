@@ -9,7 +9,9 @@ use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use RuntimeException;
 use Tests\TestCase;
 
 final class ImportPreviewUploadTest extends TestCase
@@ -126,6 +128,66 @@ final class ImportPreviewUploadTest extends TestCase
 
         $this->assertSame($before, $this->tableCounts());
         $this->assertNoPreviewSideEffects();
+    }
+
+    public function test_unexpected_source_import_failure_uses_bounded_error_contract(): void
+    {
+        Storage::fake('local');
+        $exceptionMessage = 'SENSITIVE_INTERNAL_CANARY C:\\internal\\secret\\patient-data.txt line 777 trace';
+        Log::shouldReceive('error')
+            ->once()
+            ->withArgs(function (string $message, array $context) use ($exceptionMessage): bool {
+                return $message === 'source_import_internal_error'
+                    && ($context['error_code'] ?? null) === 'SOURCE_IMPORT_INTERNAL_ERROR'
+                    && is_string($context['correlation_id'] ?? null)
+                    && ! array_key_exists('message', $context)
+                    && ! array_key_exists('exception', $context)
+                    && ! array_key_exists('file', $context)
+                    && ! array_key_exists('line', $context)
+                    && ! array_key_exists('trace', $context)
+                    && ! str_contains(json_encode($context, JSON_THROW_ON_ERROR), $exceptionMessage)
+                    && ! str_contains(json_encode($context, JSON_THROW_ON_ERROR), '1234567890121');
+            });
+
+        $baseFile = UploadedFile::fake()->createWithContent('synthetic.csv', "cid,service_key\n1234567890121,SYN_ALPHA");
+        $sourceFile = new class(
+            $baseFile->getPathname(),
+            'synthetic.csv',
+            'text/csv',
+            UPLOAD_ERR_OK,
+            true
+        ) extends UploadedFile {
+            public string $failureMessage = '';
+
+            public function store($path = '', $options = [])
+            {
+                throw new RuntimeException($this->failureMessage);
+            }
+        };
+        $sourceFile->failureMessage = $exceptionMessage;
+
+        $response = $this->post('/imports/source-files', [
+            'files' => [$sourceFile],
+        ]);
+
+        $response->assertStatus(500)
+            ->assertJson([
+                'error_code' => 'SOURCE_IMPORT_INTERNAL_ERROR',
+                'message' => 'Source import could not be completed.',
+                'file_stored' => false,
+                'patient_data_imported' => false,
+            ])
+            ->assertJsonStructure(['correlation_id']);
+
+        $body = $response->getContent();
+        $this->assertIsString($body);
+        $this->assertStringNotContainsString($exceptionMessage, $body);
+        $this->assertStringNotContainsString('RuntimeException', $body);
+        $this->assertStringNotContainsString('C:\\internal\\secret\\patient-data.txt', $body);
+        $this->assertMatchesRegularExpression(
+            '/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i',
+            (string) $response->json('correlation_id'),
+        );
     }
 
     public function test_valid_source_import_is_staged_and_reconciled(): void

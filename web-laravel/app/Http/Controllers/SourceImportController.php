@@ -18,6 +18,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use LogicException;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
@@ -125,20 +126,21 @@ final class SourceImportController extends Controller
                 'file_stored' => false,
                 'patient_data_imported' => false,
             ], 422);
-        } catch (\Throwable $e) {
-            // TEMPORARY: Log the actual exception for debugging
-            Log::error('SourceImportController::store exception', [
-                'class' => get_class($e),
-                'message' => $e->getMessage(),
-                'file' => $e->getFile(),
-                'line' => $e->getLine(),
-                'trace' => $e->getTraceAsString(),
+        } catch (\Throwable) {
+            $correlationId = (string) Str::uuid();
+
+            Log::error('source_import_internal_error', [
+                'error_code' => 'SOURCE_IMPORT_INTERNAL_ERROR',
+                'correlation_id' => $correlationId,
             ]);
+
             // Clean up any temp files on unexpected error
             $this->cleanupTempImports();
 
             return response()->json([
-                'message' => 'Import failed: '.$e->getMessage(),
+                'error_code' => 'SOURCE_IMPORT_INTERNAL_ERROR',
+                'message' => 'Source import could not be completed.',
+                'correlation_id' => $correlationId,
                 'file_stored' => false,
                 'patient_data_imported' => false,
             ], 500);

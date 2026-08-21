@@ -23,6 +23,7 @@ final class XlsxSourceParser
 
     public function __construct(
         private readonly StreamingCsvParser $csvParser = new StreamingCsvParser,
+        private readonly ?\Closure $readerFactory = null,
     ) {}
 
     /**
@@ -50,7 +51,7 @@ final class XlsxSourceParser
         }
 
         try {
-            $reader = new Xlsx;
+            $reader = $this->readerFactory !== null ? ($this->readerFactory)() : new Xlsx;
             $reader->setReadDataOnly(false);
             $reader->setReadEmptyCells(true);
             $reader->setIncludeCharts(false);
@@ -157,8 +158,8 @@ final class XlsxSourceParser
             }
 
             return $this->csvParser->parseString($this->toCsv($matrix), $requiredColumns, 'source');
-        } catch (\Throwable $exception) {
-            return $this->error('xlsx_parse_failed', 'XLSX parsing failed safely: '.$exception->getMessage());
+        } catch (\Throwable) {
+            return $this->error('XLSX_PARSE_FAILED', 'Unable to read XLSX file.');
         } finally {
             if (is_file($csvPath)) {
                 @unlink($csvPath);
